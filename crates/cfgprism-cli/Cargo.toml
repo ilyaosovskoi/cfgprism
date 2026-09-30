@@ -1,0 +1,17 @@
+[package]
+name = "cfgprism"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "cfgprism CLI: lossless-ish config converter with explicit warnings"
+
+[[bin]]
+name = "cfgprism"
+path = "src/main.rs"
+
+[dependencies]
+cfgprism-core = { workspace = true }
+cfgprism-formats = { path = "../cfgprism-formats" }
+clap = { version = "4", features = ["derive"] }
+thiserror = { workspace = true }

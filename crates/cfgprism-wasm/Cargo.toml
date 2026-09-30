@@ -1,0 +1,16 @@
+[package]
+name = "cfgprism-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "cfgprism WASM bindings for the web demo (stage 7; stage-1 skeleton)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cfgprism-core = { workspace = true }
+cfgprism-formats = { path = "../cfgprism-formats" }
+serde_json = { version = "1", features = ["preserve_order"] }
+wasm-bindgen = "0.2"

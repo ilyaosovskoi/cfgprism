@@ -1,88 +1,113 @@
-# docs/DECISIONS.md — журнал решений (append-only)
+# docs/DECISIONS.md — decision log (append-only)
 
-Формат записи: `## Dn. <заголовок> — <дата>` + Контекст / Решение / Обоснование / Альтернативы.
-Неоднозначности ТЗ решаются здесь, а не в чате.
+Entry format: `## Dn. <title> — <date>` + Context / Decision / Rationale /
+Alternatives. Ambiguities in the brief are resolved here, not in chat.
 
-## D1. TOML — `toml_edit`, не `taplo` — 2026-09-30
+## D1. TOML — `toml_edit`, not `taplo` — 2026-09-30
 
-- Контекст: нужны trivia (комменты/пробелы/порядок) + byte round-trip + line:col.
-- Решение: `toml_edit` (toml-rs, spec-1.1.0).
-- Обоснование: `DocumentMut::to_string()` даёт round-trip из коробки;
-  `decor`/`repr` прямо маппятся на IR Trivia/Style; лёгкие зависимости
-  (важно для статического бинарника и WASM).
-- Альтернативы: `taplo` (rowan green-tree, полный fidelity + форматтер/LSP,
-  но тяжёлый dependency-tree ~160K SLoC транзитивно) — отклонён как оверхед.
-  Известные потери `toml_edit` (dotted-keys порядок, reorder scattered tables)
-  покрываем warning-ами и тестами, а не замалчиваем.
+- Context: need trivia (comments/whitespace/order) + byte round-trip + line:col.
+- Decision: `toml_edit` (toml-rs, spec-1.1.0).
+- Rationale: `DocumentMut::to_string()` round-trips out of the box;
+  `decor`/`repr` map directly onto IR Trivia/Style; light dependencies
+  (matters for the static binary and WASM).
+- Alternatives: `taplo` (rowan green-tree, full fidelity + formatter/LSP, but
+  a heavy dependency tree ~160K SLoC transitively) — rejected as overhead.
+  Known `toml_edit` losses (dotted-key order, scattered-table reorder) are
+  covered by warnings and tests instead of being hushed up.
 
-## D2. YAML — `saphyr-parser` + свой trivia-collector — 2026-09-30
+## D2. YAML — `saphyr-parser` + own trivia collector — 2026-09-30
 
-- Контекст: ТЗ требует YAML round-trip без потерь + якоря/алиасы + комменты.
-- Решение: event-source `saphyr-parser` (YAML 1.2 compliant, активен;
-  `yaml-rust2` — только maintenance) + собственный сканер trivia
-  (комментарии/пустые строки/стили/кавычки/block/flow) с аттачем по строкам.
-- Обоснование: готового trivia-preserving YAML-крейта в Rust нет
-  (проверены `yaml-rust2`, `saphyr`, `serde-saphyr`/`granit-parser`:
-  либо дропают комменты, либо ловят только `Commented<T>`, freestanding —
-  нет). Писать YAML-парсер с нуля дороже, чем коллектор поверх compliant events.
-- Альтернативы: `yaml-rust2` (тот же недостаток + хуже compliance),
-  `unsafe-libyaml` (C-зависимость, ломает статик-билд и WASM) — отклонены.
+- Context: the brief demands YAML round-trip without losses + anchors/aliases
+  + comments.
+- Decision: event source `saphyr-parser` (YAML 1.2 compliant, active;
+  `yaml-rust2` is maintenance-only) + our own trivia scanner
+  (comments/blank lines/styles/quotes/block/flow) attached by line.
+- Rationale: no ready trivia-preserving YAML crate exists in Rust (checked
+  `yaml-rust2`, `saphyr`, `serde-saphyr`/`granit-parser`: they either drop
+  comments or catch only `Commented<T>`, never freestanding ones). Writing a
+  YAML parser from scratch costs more than a collector over compliant events.
+- Alternatives: `yaml-rust2` (same flaw + worse compliance),
+  `unsafe-libyaml` (C dependency, breaks the static build and WASM) —
+  rejected.
 
-## D3. JSON (strict) — свой hand-rolled парсер — 2026-09-30
+## D3. JSON (strict) — own hand-rolled parser — 2026-09-30
 
-- Контекст: нужен byte round-trip JSON в себя + spans + сохранение порядка.
-- Решение: собственный recursive-descent (ориентир API — `jsonc-parser`
-  с `comments/tokens`), финализация бенчмарком на Этапе 2.
-- Обоснование: `serde_json` дропает комментарии/whitespace (порядок только
-  с `preserve_order`); `jsonc-parser` ближе всего, но тянем свой для контроля
-  round-trip без surprises CST-API.
-- Альтернативы: напрямую `jsonc-parser` — запасной вариант, если свой
-  проиграет по fuzz/bench.
+- Context: need JSON-to-itself byte round-trip + spans + order preservation.
+- Decision: our own recursive-descent (API modeled on `jsonc-parser` with
+  `comments`/`tokens`), finalized by a benchmark in Stage 2.
+- Rationale: `serde_json` drops comments/whitespace (order only with
+  `preserve_order`); `jsonc-parser` is closest but we want round-trip control
+  without CST-API surprises.
+- Alternatives: using `jsonc-parser` directly — kept as fallback if ours
+  loses on fuzz/bench.
 
-## D4. JSONC/JSON5 — свой парсер-расширение JSON — 2026-09-30
+## D4. JSONC/JSON5 — own JSON-extension parser — 2026-09-30
 
-- Контекст: JSONC/JSON5 — надмножества JSON (комменты, trailing commas,
-  unquoted keys, single-quotes, hex, multiline).
-- Решение: один парсер с флагом диалекта, trivia из D3 + расширения.
-- Обоснование: trivia-preserving JSON5-крейта в Rust нет
-  (`json5-rs`/`serde_json5` — serde-only, дропают trivia;
-  `json5format` — только форматтер). Грамматика мала — писать самим.
-- Альтернативы: форк `json5format` — отклонён (не парсер под IR).
+- Context: JSONC/JSON5 are JSON supersets (comments, trailing commas,
+  unquoted keys, single quotes, hex, multiline).
+- Decision: one parser with a dialect flag; trivia from D3 + extensions.
+- Rationale: no trivia-preserving JSON5 crate exists in Rust
+  (`json5-rs`/`serde_json5` are serde-only and drop trivia; `json5format` is
+  a formatter only). The grammar is small — writing it is cheapest.
+- Alternatives: forking `json5format` — rejected (not an IR parser).
 
-## D5. `.env` / INI / Properties — свои line-парсеры — 2026-09-30
+## D5. `.env` / INI / Properties — own line parsers — 2026-09-30
 
-- Контекст: ТЗ требует byte round-trip простых line-форматов.
-- Решение: три маленьких собственных парсера (~200 строк каждый).
-- Обоснование: `dotenv/dotenvy` — loader'ы (теряют комменты/кавычки/`export`);
-  `dotenv-parser` заброшен 5+ лет; `rust-ini/configparser` не гарантируют
-  round-trip. Грамматики тривиальны — дешевле написать, чем чинить чужое.
+- Context: the brief demands byte round-trip for simple line formats.
+- Decision: three small hand-written parsers (~200 lines each).
+- Rationale: `dotenv`/`dotenvy` are loaders (lose comments/quotes/`export`);
+  `dotenv-parser` abandoned 5+ years; `rust-ini`/`configparser` do not
+  guarantee round-trip. Trivial grammars — cheaper to write than to fix.
 
-## D6. HCL — `hcl-edit`/`hcl-rs`, scope «упрощённый HCL» — 2026-09-30
+## D6. HCL — `hcl-edit`/`hcl-rs`, "simplified HCL" scope — 2026-09-30
 
-- Контекст: Этап 5 требует HCL; полный HCL включает expressions/templates/eval.
-- Решение: парсинг/round-trip через `hcl-edit` («toml_edit для HCL»);
-  значения через `hcl-rs`; scope — атрибуты/блоки/литералы; `for`/functions/
-  `${}` маппятся в IR как opaque-скаляры + `WarningKind::UnsupportedConstruct`.
-- Обоснование: единственный trivia-preserving HCL в экосистеме; полный eval —
-  отдельный проект, вне scope конвертера.
-- Альтернативы: писать HCL-парсер самим — отклонено (дорого, хуже compliance
-  с go-hcl).
+- Context: Stage 5 demands HCL; full HCL includes expressions/templates/eval.
+- Decision: parsing/round-trip via `hcl-edit` ("toml_edit for HCL"); values
+  via `hcl-rs`; scope — attributes/blocks/literals; `for`/functions/`${}`
+  map into the IR as opaque scalars + `WarningKind::UnsupportedConstruct`.
+- Rationale: the only trivia-preserving HCL in the ecosystem; full eval is a
+  separate project, out of converter scope.
+- Alternatives: writing our own HCL parser — rejected (expensive, worse
+  compliance with go-hcl).
 
 ## D7. KDL — `kdl` (kdl-rs v2) — 2026-09-30
 
-- Контекст: нужен trivia-KDL.
-- Решение: крейт `kdl` (document-oriented, хранит formatting/comments,
+- Context: need trivia-KDL.
+- Decision: the `kdl` crate (document-oriented, keeps formatting/comments,
   byte round-trip, v1/v2).
-- Обоснование: дословный аналог `toml_edit` для KDL; `knus` отклонён —
-  он serde-derive и дропает trivia.
+- Rationale: literally `toml_edit` for KDL; `knus` rejected — serde-derive
+  based, drops trivia.
 
-## D8. RON — `ron` + свой comment-lex; round-trip только partial — 2026-09-30
+## D8. RON — `ron` + own comment lexer; round-trip partial only — 2026-09-30
 
-- Контекст: RON нужен на Этапе 5, но trivia-RON в Rust отсутствует.
-- Решение: значения через `ron`, комментарии — собственным pre-lex с аттачем
-  к IR; byte round-trip для RON НЕ обещаем, в README-матрице будет
-  `round-trip: partial` + warning при нормализации.
-- Обоснование: `ron2` (AST-based, 2026) незрел (единицы звёзд, unstable API).
-  Честное ограничение лучше выдуманного round-trip.
-- Альтернативы: ждать/мигрировать на `ron2` при стабилизации — зафиксировано
-  как follow-up.
+- Context: RON is required in Stage 5, but trivia-RON does not exist in Rust.
+- Decision: values via `ron`, comments via our own pre-lexer attached to the
+  IR; byte round-trip for RON is NOT promised, the README matrix will show
+  `round-trip: partial` + a normalization warning.
+- Rationale: `ron2` (AST-based, 2026) is immature (single-digit stars,
+  unstable API). An honest limitation beats a faked round-trip.
+- Alternatives: waiting/migrating to `ron2` once stable — recorded as
+  follow-up.
+
+## D9. MSRV 1.82 — 2026-09-30
+
+- Context: clippy's `incompatible_msrv` lint flags `Option::is_none_or`
+  (used in the CLI stdin detection) against the workspace `rust-version =
+  "1.75"`.
+- Decision: raise workspace MSRV to 1.82 instead of rewriting the code.
+- Rationale: `is_none_or`/`is_some_and` read better than manual matches;
+  1.82 is widely available (CI images, distros, rustup) and still
+  conservative; the lint stays green with `-D warnings`.
+- Alternatives: avoid `is_none_or` to keep 1.75 — rejected, not worth the
+  readability cost for a 2026 project.
+
+## D10. `serde_json/preserve_order` in the stage-1 JSON stub — 2026-09-30
+
+- Context: the CLI test `convert_json_file_to_json_stdout` failed: `{"b":
+  1, "a": 2}` came out as `{"a": 2, "b": 1}`. Root cause: `serde_json::Map`
+  is a BTreeMap by default and silently sorts keys.
+- Decision: enable `preserve_order` (IndexMap backend) for `serde_json` in
+  `cfgprism-formats` (and `cfgprism-wasm` for unification).
+- Rationale: silent key re-sorting is exactly the loss class cfgprism exists
+  to fight; the stub must already preserve order even before Stage 2 brings
+  real trivia. Caught by test, fixed by feature flag, recorded here.

@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  no-unwrap-in-lib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: forbid unwrap() outside tests
+        shell: bash
+        run: |
+          # Allowlist: #[cfg(test)] modules and tests/ dirs may use unwrap/expect.
+          hits=$(grep -rn --include='*.rs' -E '\.unwrap\s*\(' crates/ | grep -v '/tests/' | grep -v '#\[cfg(test)\]' || true)
+          # Filter out lines inside #[cfg(test)] mod tests blocks (heuristic: files' test modules).
+          # Precise check: unwrap in non-test code of src/lib.rs, src/doc.rs, etc. is banned;
+          # unit tests live in the same files, so verify by context instead:
+          echo "$hits" | awk 'BEGIN{bad=0} {print; bad=1} END{exit 0}'
+          # Second pass: fail only if unwrap appears outside a `mod tests` block.
+          python3 - "$@" <<'EOF'
+          import pathlib, re, sys
+          bad = []
+          for p in pathlib.Path("crates").rglob("*.rs"):
+              if "/tests/" in p.as_posix():
+                  continue
+              text = p.read_text()
+              # Strip test modules.
+              stripped = re.sub(r"#\[cfg\(test\)\]\s*mod tests\s*\{.*", "", text, flags=re.S)
+              for i, line in enumerate(stripped.splitlines(), 1):
+                  if re.search(r"\.unwrap\s*\(", line):
+                      bad.append(f"{p}:{i}: {line.strip()}")
+          if bad:
+              print("FORBIDDEN unwrap() in library code:")
+              print("\n".join(bad))
+              sys.exit(1)
+          print("no unwrap() in library code — ok")
+          EOF
+
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace

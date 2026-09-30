@@ -1,0 +1,12 @@
+[package]
+name = "cfgprism-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "cfgprism intermediate representation (IR), Format trait, warnings and errors"
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
