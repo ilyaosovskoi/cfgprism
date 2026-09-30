@@ -17,11 +17,15 @@
 //! ```
 
 pub mod dotenv;
+pub mod hcl;
 pub mod ini;
 pub mod json;
 pub mod json5;
 pub mod jsonc;
+pub mod kdl;
 pub mod logical;
+pub mod properties;
+pub mod ron;
 pub mod toml;
 pub mod util;
 pub mod yaml;
@@ -29,12 +33,16 @@ pub mod yaml;
 mod registry;
 
 pub use dotenv::DotenvFormat;
+pub use hcl::HclFormat;
 pub use ini::IniFormat;
 pub use json::JsonFormat;
 pub use json5::Json5Format;
 pub use jsonc::JsoncFormat;
+pub use kdl::KdlFormat;
 pub use logical::convert_text;
+pub use properties::PropertiesFormat;
 pub use registry::{all_formats, detect_format, supported_names};
+pub use ron::RonFormat;
 pub use toml::TomlFormat;
 pub use yaml::YamlFormat;
 

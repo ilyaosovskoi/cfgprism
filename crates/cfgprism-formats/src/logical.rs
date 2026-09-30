@@ -194,7 +194,8 @@ pub fn restyle_comment(comment: &str, marker: &str) -> Vec<String> {
         return out;
     }
     // Line comment: swap the marker, keep the exact remainder.
-    for m in ["//", "#", ";"] {
+    // (`!` is Java-properties style; `;` is INI style.)
+    for m in ["//", "#", ";", "!"] {
         if let Some(rest) = t.strip_prefix(m) {
             if rest.is_empty() {
                 return vec![marker.to_string()];

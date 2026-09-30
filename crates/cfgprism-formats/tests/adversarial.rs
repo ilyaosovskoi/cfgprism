@@ -123,3 +123,54 @@ fn adversarial_dotenv_ini() {
         no_panic("ini", src);
     }
 }
+
+#[test]
+fn adversarial_hcl_properties() {
+    let deep_attr = "a = ".to_string() + &"[".repeat(500) + "1" + &"]".repeat(500);
+    let deep_block =
+        (0..300).map(|i| format!("b{i} {{ ")).collect::<String>() + "x = 1 " + &"}".repeat(300);
+    let cases = [
+        deep_attr,
+        deep_block,
+        "a = ".to_string() + &"[1,".repeat(5_000),
+        "a = \"".to_string() + &"x".repeat(1_000_000),
+        "a = <<EOT\n".to_string(),
+        "a = var.x\n".to_string(),
+        "a = foo(\n".to_string(),
+        "{".repeat(10_000),
+    ];
+    for src in &cases {
+        no_panic("hcl", src);
+    }
+    let pcases = [
+        "k = ".to_string() + &"v".repeat(1_000_000),
+        "k\\".to_string(),
+        "\\u00".to_string(),
+        "k = v\\\n".to_string() + &"  w\\\n".repeat(10_000),
+        "=".repeat(100_000),
+    ];
+    for src in &pcases {
+        no_panic("properties", src);
+    }
+}
+
+#[test]
+fn adversarial_kdl_ron() {
+    // External crates do the heavy parsing; the adapters must translate
+    // failures into Err (never panic) and never hang.
+    let cases = [
+        "node ".to_string() + &"1 ".repeat(20_000),
+        "{".repeat(5_000),
+        "a \"".to_string() + &"x".repeat(500_000),
+    ];
+    for src in &cases {
+        no_panic("kdl", src);
+        no_panic("ron", src);
+    }
+    for src in [
+        "(".to_string() + &"(a: 1),".repeat(5_000),
+        "(a: \"".to_string() + &"x".repeat(500_000),
+    ] {
+        no_panic("ron", &src);
+    }
+}

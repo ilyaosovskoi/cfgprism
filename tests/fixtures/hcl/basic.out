@@ -1,0 +1,19 @@
+# head comment.
+name = "svc" # inline
+count = 3
+enabled = true
+ports = [8000, 8001]
+obj = {a = 1}
+
+// Block section.
+server "web" {
+  host = "example.com" # c
+  extra = [1, 2, 3]
+  nested {
+    deep = 1
+  }
+}
+
+server "db" {
+  host = "db.local"
+}

@@ -5,7 +5,8 @@
 use cfgprism_core::FormatRegistry;
 
 use crate::{
-    DotenvFormat, IniFormat, Json5Format, JsonFormat, JsoncFormat, TomlFormat, YamlFormat,
+    DotenvFormat, HclFormat, IniFormat, Json5Format, JsonFormat, JsoncFormat, KdlFormat,
+    PropertiesFormat, RonFormat, TomlFormat, YamlFormat,
 };
 
 /// Build the registry with every supported format (help order).
@@ -19,6 +20,10 @@ pub fn all_formats() -> FormatRegistry {
         Box::new(YamlFormat),
         Box::new(DotenvFormat),
         Box::new(IniFormat),
+        Box::new(HclFormat),
+        Box::new(PropertiesFormat),
+        Box::new(KdlFormat),
+        Box::new(RonFormat),
     ])
 }
 
@@ -32,9 +37,7 @@ pub fn supported_names() -> Vec<&'static str> {
 ///
 /// Extension match is case-insensitive; additionally the basename `.env`
 /// maps to `dotenv`. Returns `None` when nothing matches (`-`, stdin and
-/// unknown extensions). Reserved future extensions (hcl/properties/kdl/ron)
-/// return `None` for now so the CLI reports "cannot detect" with a
-/// `-f/--from` hint instead of a misleading guess.
+/// unknown extensions).
 #[must_use]
 pub fn detect_format(path: &str) -> Option<&'static str> {
     let file = path.rsplit('/').next().unwrap_or(path);
@@ -53,6 +56,10 @@ pub fn detect_format(path: &str) -> Option<&'static str> {
         "yaml" | "yml" => Some("yaml"),
         "env" => Some("dotenv"),
         "ini" | "cfg" | "conf" => Some("ini"),
+        "hcl" | "tf" | "tfvars" => Some("hcl"),
+        "properties" => Some("properties"),
+        "kdl" => Some("kdl"),
+        "ron" => Some("ron"),
         _ => None,
     }
 }
@@ -71,6 +78,11 @@ mod tests {
         assert_eq!(detect_format("app.env"), Some("dotenv"));
         assert_eq!(detect_format(".env"), Some("dotenv"));
         assert_eq!(detect_format("setup.ini"), Some("ini"));
+        assert_eq!(detect_format("main.hcl"), Some("hcl"));
+        assert_eq!(detect_format("main.tf"), Some("hcl"));
+        assert_eq!(detect_format("app.properties"), Some("properties"));
+        assert_eq!(detect_format("config.kdl"), Some("kdl"));
+        assert_eq!(detect_format("data.ron"), Some("ron"));
     }
 
     #[test]

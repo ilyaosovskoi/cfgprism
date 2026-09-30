@@ -249,3 +249,38 @@ Alternatives. Ambiguities in the brief are resolved here, not in chat.
 - Alternatives: indent pre-scan for YAML depth (rejected — block-scalar
   false positives, duplicates lexing); iterative saphyr use (impossible —
   their recursion).
+
+## D17. Stage-5 format scopes: own HCL parser, KDL/RON canonical — 2026-09-30
+
+- Context: D6 named `hcl-edit`/`hcl-rs`; KDL/RON fidelity was open.
+- Decision:
+  - HCL: own simplified parser (supersedes D6). Rationale: the brief
+    scopes HCL as "simplified" (attributes, blocks, JSON-ish values);
+    mapping `hcl-edit` decor onto IR verbatim slices costs as much as a
+    purpose-built parser with none of the round-trip control. Blocks nest
+    by label (`resource "x" {…}` → `resource` → `x`), headers stay verbatim
+    in `open_raw`, objects use `Flow` style so verbatim/logical emission
+    never confuses them. Expressions, variable refs, calls, heredocs,
+    `(…)` keys and type-level features are positioned errors, never
+    misparses; `${…}` passes through literally (documented).
+  - KDL: `kdl` 6.5.0 pinned (`=6.5.0`: 6.6+ needs rustc 1.95, we run 1.94;
+    revisit on toolchain bump) with `v1-fallback`. Canonical — not byte —
+    round-trip: values, comments (leading trivia + same-line remainders via
+    spans; `/-` travels as comments) and order survive; layout normalizes.
+    Node mapping: bare→null, single-arg→scalar, else
+    `{args, props…, children}` with explicit `args`/`children` collision
+    errors and `(type)` rejection. Deep-input aborts inside the crate, so
+    parsing runs on a 256 MiB worker thread (same cure as YAML/D16; the
+    document is owned, so plain spawn works).
+  - RON: `ron` (+ `indexmap` feature: default maps sort keys!) for values,
+    own comment pre-lexer hoisted to the head (no spans exist). Canonical
+    round-trip; struct form for ident-safe keys, map form otherwise;
+    `Some` unwraps, struct/enum names drop (the `Value` model), chars
+    become strings. All documented in the module header.
+  - Properties: own line parser (Java rules: `=`/`:`/whitespace
+    separators, `\` continuations, `\uXXXX`); byte-verbatim like dotenv.
+- Rationale: each format is one module + registry lines + fixtures; core
+  untouched (CONTRIBUTING.md documents the 30-minute recipe + PR template).
+- Alternatives: `hcl-edit` integration (rejected — decor mapping without
+  round-trip control); KDL byte-verbatim via spans (deferred — the `}`
+  gap has no dedicated slice; follow-up); `ron2` (rejected per D8).

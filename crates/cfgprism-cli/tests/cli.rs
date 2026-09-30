@@ -140,7 +140,41 @@ fn formats_subcommand_lists_all_stage3_formats() {
     let out = Command::new(bin()).arg("formats").output().expect("spawn");
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf8");
-    for name in ["json", "jsonc", "json5", "toml", "yaml", "dotenv", "ini"] {
+    for name in [
+        "json",
+        "jsonc",
+        "json5",
+        "toml",
+        "yaml",
+        "dotenv",
+        "ini",
+        "hcl",
+        "properties",
+        "kdl",
+        "ron",
+    ] {
         assert!(stdout.lines().any(|l| l.trim() == name), "{stdout}");
     }
+}
+
+#[test]
+fn convert_properties_to_json() {
+    let input = write_tmp("in.properties", "k = v\n");
+    let out = Command::new(bin())
+        .args(["convert"])
+        .arg(&input)
+        .args(["-t", "json"])
+        .output()
+        .expect("spawn");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8(out.stdout).expect("utf8");
+    assert!(
+        stdout.contains("\"k\"") && stdout.contains("\"v\""),
+        "{stdout}"
+    );
+    std::fs::remove_file(input).ok();
 }

@@ -4,11 +4,13 @@ A config converter between formats **without silent losses**: it preserves
 comments, key order and formatting wherever the target format can express
 them, and warns explicitly wherever loss is unavoidable.
 
-> Status: **Stage 4 — cross-conversion — done.** All 7×7 format pairs
-> convert with explicit warnings (matrix-tested, 190+ pairs); 5 MB converts
-> in <1 s; adversarial + fuzz coverage for hostile inputs. Architecture and
-> parser choices: [`docs/DESIGN.md`](docs/DESIGN.md); decision log:
-> [`docs/DECISIONS.md`](docs/DECISIONS.md).
+> Status: **Stage 5 — more formats — done.** HCL (simplified, own parser),
+> Properties (own parser) round-trip byte-identically; KDL and RON round-trip
+> canonically (values, comments, order preserved; layout normalized).
+> 11 formats total. Architecture and parser choices:
+> [`docs/DESIGN.md`](docs/DESIGN.md); decision log:
+> [`docs/DECISIONS.md`](docs/DECISIONS.md); adding more:
+> [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Conversion matrix
 
@@ -36,6 +38,18 @@ the input (never silent loss).
 Plus: `null`→toml is an error; order violations→toml/ini warn
 `KeyReordered`; duplicate keys collapse last-wins with a warning on strict
 targets only. `--strict` turns any warning into a hard error.
+
+## Stage-5 formats (all pairs convert-or-error via the same rules)
+
+| target | mapping | notes |
+|---|---|---|
+| hcl | attrs for scalars/lists, blocks for nested maps | expressions/heredocs are parse errors; `${…}` literal |
+| properties | flat string map | like dotenv; `\uXXXX`, continuations |
+| kdl | nodes + args/props/children | nested arrays unrepresentable (precise error); canonical layout |
+| ron | structs/maps/lists | struct names drop (see D17); comments hoist; canonical layout |
+
+The 7×7 matrix suite covers the level-1+YAML core; stage-5 pairs are
+covered by golden fixtures, unit tests and adversarial cases.
 
 ## Why not yq / dasel
 
@@ -67,7 +81,7 @@ cat config.json | cfgprism convert -f json -t jsonc
 # Any warning becomes a hard error
 cfgprism convert config.toml -t toml --strict
 
-# Supported formats (stage 3): json jsonc json5 toml yaml dotenv ini
+# Supported formats (stage 5): json jsonc json5 toml yaml dotenv ini hcl properties kdl ron
 cfgprism formats
 ```
 
@@ -79,7 +93,8 @@ Warnings always go to stderr; converted text goes to stdout (or `-o` file).
 crates/cfgprism-core     — IR (Node/Doc/Trivia/Style/Span), Format trait, warnings, errors
 crates/cfgprism-formats  — json/jsonc/json5 (lossless engine), toml
                          (toml_edit adapter), yaml (saphyr events +
-                         own trivia), dotenv, ini
+                         own trivia), dotenv, ini, hcl + properties
+                         (own parsers), kdl, ron
 crates/cfgprism-cli      — `cfgprism` binary (clap)
 crates/cfgprism-wasm     — wasm-bindgen wrapper (skeleton; full web demo in stage 7)
 tests/fixtures/<format>  — golden files (*.in + *.out)
@@ -94,7 +109,7 @@ docs/DECISIONS.md        — decision log (append-only)
 - [x] Stage 2. JSON, JSONC/JSON5, TOML, `.env`, INI (byte round-trip)
 - [x] Stage 3. YAML (subset + flow + Norway tests)
 - [x] Stage 4. Cross-conversion, full pair matrix, bench + fuzz
-- [ ] Stage 5. HCL, Properties, KDL, RON
+- [x] Stage 5. HCL, Properties, KDL, RON
 - [ ] Stage 6. DX and growth (README/GIF, CONTRIBUTING, templates, releases)
 - [ ] Stage 7. Web demo (WASM + GitHub Pages)
 

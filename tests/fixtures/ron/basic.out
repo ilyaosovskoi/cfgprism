@@ -1,0 +1,9 @@
+// head comment.
+(
+  debug: true,
+  name: "x",
+  maybe: None,
+  ratio: 2.5,
+  list: [1, "two"],
+  nested: (a: 1)
+)

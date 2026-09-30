@@ -1,0 +1,11 @@
+// head comment.
+server "x" port=8080 {
+  // multi
+  route "/a"
+  route "/b" secure=true
+}
+debug
+answer 42
+ratio 1.5
+flag true
+nothing

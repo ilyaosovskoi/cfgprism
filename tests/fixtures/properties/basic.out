@@ -1,0 +1,12 @@
+# head
+! bang comment
+
+key = value
+colon: v
+space v2
+escaped\ key = a\nb
+uni = caf\u00e9
+trail = one \
+  two
+empty=
+bare
