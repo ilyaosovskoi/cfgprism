@@ -1,0 +1,10 @@
+# dotenv showcase.
+export FOO=bar # inline comment
+
+EMPTY=
+QUOTED="hello world"
+SINGLE='literal \n kept'
+HASH_inside=abc#def
+SPACED = spaced value
+TRAILING_SPACE=value   
+CRLF=windows

@@ -1,0 +1,1 @@
+{"int": 42, "neg": -7, "float": 1.5, "exp": 1e3, "neg_exp": -2.5E-2, "zero": 0, "str": "héllo \"w\" \\ / \b \f \n \r \t \u00e9", "empty": {}, "nested": {"a": [[1], []]}}

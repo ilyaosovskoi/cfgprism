@@ -9,13 +9,15 @@
 //! ```
 
 mod doc;
+mod equiv;
 mod error;
 mod format;
 mod options;
 mod warning;
 
 pub use doc::{Anchor, Doc, Entry, Key, Node, Number, NumberKind, Style, Trivia, Value};
-pub use error::{Error, ErrorKind, LineCol, Span};
+pub use equiv::values_equal;
+pub use error::{offset_to_line_col, Error, ErrorKind, LineCol, Span};
 pub use format::{convert, ConvertOutput, EmitOutput, Format, FormatRegistry};
 pub use options::Options;
 pub use warning::{Warning, WarningKind};

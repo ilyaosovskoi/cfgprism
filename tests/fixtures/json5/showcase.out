@@ -1,0 +1,14 @@
+{
+  // JSON5 showcase.
+  unquoted: 'single quoted',
+  $dollar: 0xdecaf,
+  _under: +1,
+  dot: .5,
+  trail_dot: 5.,
+  inf: Infinity,
+  ninf: -Infinity,
+  nan: NaN,
+  nested: {
+    arr: [1, 2, 3,],
+  },
+}

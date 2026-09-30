@@ -1,0 +1,13 @@
+; INI showcase.
+global = yes
+
+[server] ; section comment
+# hash comment works too.
+host = example.com
+port: 8080
+multi = first line
+  second line
+
+[server]
+# repeated section block is preserved.
+extra = 1

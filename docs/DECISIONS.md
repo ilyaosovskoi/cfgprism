@@ -102,7 +102,6 @@ Alternatives. Ambiguities in the brief are resolved here, not in chat.
   readability cost for a 2026 project.
 
 ## D10. `serde_json/preserve_order` in the stage-1 JSON stub — 2026-09-30
-
 - Context: the CLI test `convert_json_file_to_json_stdout` failed: `{"b":
   1, "a": 2}` came out as `{"a": 2, "b": 1}`. Root cause: `serde_json::Map`
   is a BTreeMap by default and silently sorts keys.
@@ -111,3 +110,48 @@ Alternatives. Ambiguities in the brief are resolved here, not in chat.
 - Rationale: silent key re-sorting is exactly the loss class cfgprism exists
   to fight; the stub must already preserve order even before Stage 2 brings
   real trivia. Caught by test, fixed by feature flag, recorded here.
+
+## D11. IR verbatim slices + entry-trivia convention — 2026-09-30
+
+- Context: Stage 2 needs byte-identical self round-trip through the IR
+  (not around it — retaining the source text would make goldens vacuous).
+- Decision: `Trivia.prefix_raw/suffix_raw`, `Key.raw`, `Entry.sep_raw`,
+  `Node.open_raw/close_raw`, scalar `Style::Original`, `Value::Datetime`.
+  Same-format emitters concatenate stored slices; cross-format emitters
+  ignore every `*_raw` field. Convention: pre-entry comments live on
+  `key_trivia.leading`, inline comments on `value.trivia.inline` (array
+  items use their own `trivia`); documented on `Entry`.
+- Rationale: one uniform mechanism for JSON gaps, TOML decor, and
+  line-based formats; logical comments stay reachable for conversion.
+- Alternatives: source retention + spans (rejected — goldens would prove
+  nothing), per-format hidden CSTs (rejected — splits the architecture).
+
+## D12. JSON gap-partition scheme + MAX_DEPTH 64 — 2026-09-30
+
+- Context: byte round-trip needs every gap byte owned by exactly one slice.
+- Decision: commas/colons attach to the following sibling's prefix or the
+  preceding value's suffix (split at the first newline); trailing commas
+  fold into `close_raw`. Nesting cap 64 (not serde_json's 128): debug
+  builds cost two ~8 KiB frames per bracket level, so 128 overflows 2 MiB
+  test-thread stacks before the guard trips — found by bisecting, fixed by
+  measuring. Fuzz-safety holds on all stacks.
+- Alternatives: deeper cap with iterative parsing (rejected — 64 levels is
+  plenty for human configs and the error is clean).
+
+## D13. TOML adapter storage model (probed, not assumed) — 2026-09-30
+
+- Context: `toml_edit` decor placement is undocumented; guessing caused
+  five distinct round-trip bugs.
+- Decision: probed the model (throwaway `tests/probe.rs`, deleted after):
+  value suffixes are same-line-only; key/table prefixes exclude the first
+  structural newline (emitter adds it back — universal `emit_gap` rule);
+  head gaps live on first-key/leaf prefixes; dotted keys flatten to
+  single entries rebuilt from `dotted_decor` spacing; implicit
+  header-parents are transparent; file tail (trailing comments/blanks,
+  invisible to the public API) is recovered by a backward source scan.
+  Known limitations: exotic header bracket spacing beyond leaf gaps is
+  canonicalized; parent-after-child table order normalizes (both match
+  upstream `toml_edit` behavior); CRLF is rejected by the parser.
+- Rationale: every rule is probe-verified; fixtures cover each shape.
+- Alternatives: emitting via `toml_edit` itself (rejected — bypasses the
+  IR and teaches nothing about conversion).

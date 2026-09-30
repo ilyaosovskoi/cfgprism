@@ -9,6 +9,7 @@ description = "cfgprism format implementations (one module per format)"
 [dependencies]
 cfgprism-core = { workspace = true }
 thiserror = { workspace = true }
-serde_json = { version = "1", features = ["preserve_order"] }
+toml_edit = "0.22"
 
 [dev-dependencies]
+

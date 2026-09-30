@@ -136,6 +136,24 @@ impl fmt::Display for Error {
     }
 }
 
+/// Convert a byte offset into `src` to a 1-based line:col position.
+/// Offsets past the end clamp to the last position; always >= 1:1.
+#[must_use]
+pub fn offset_to_line_col(src: &str, offset: usize) -> LineCol {
+    let offset = offset.min(src.len());
+    let mut line = 1_u32;
+    let mut col = 1_u32;
+    for b in src.as_bytes().iter().take(offset) {
+        if *b == b'\n' {
+            line = line.saturating_add(1);
+            col = 1;
+        } else {
+            col = col.saturating_add(1);
+        }
+    }
+    LineCol { line, col }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

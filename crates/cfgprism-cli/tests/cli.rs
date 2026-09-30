@@ -40,8 +40,8 @@ fn convert_json_file_to_json_stdout() {
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8(out.stdout).expect("utf8");
-    // Order preserved, pretty-printed.
-    assert_eq!(stdout, "{\n  \"b\": 1,\n  \"a\": 2\n}\n");
+    // Verbatim round-trip: bytes (and key order) preserved exactly.
+    assert_eq!(stdout, "{\"b\": 1, \"a\": 2}");
     std::fs::remove_file(input).ok();
 }
 
@@ -68,7 +68,7 @@ fn convert_reads_stdin_with_explicit_from() {
     );
     assert_eq!(
         String::from_utf8(out.stdout).expect("utf8"),
-        "{\n  \"x\": true\n}\n"
+        "{\"x\": true}"
     );
 }
 
@@ -94,10 +94,7 @@ fn convert_writes_output_file() {
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert_eq!(
-        std::fs::read_to_string(&dest).expect("read"),
-        "{\n  \"a\": 1\n}\n"
-    );
+    assert_eq!(std::fs::read_to_string(&dest).expect("read"), "{\"a\": 1}");
     std::fs::remove_file(input).ok();
     std::fs::remove_file(dest).ok();
 }

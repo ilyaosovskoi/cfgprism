@@ -1,19 +1,34 @@
 //! `cfgprism-formats`: one module per format, all behind `trait Format`.
 //!
-//! Stage 1: only a `json` stub (value-preserving, trivia NOT yet preserved —
-//! that is Stage 2) plus the format registry / extension sniffing used by
-//! the CLI. Every other name resolves to a precise
-//! `unsupported format` error, never a panic.
+//! Stage 2 set: `json` (strict), `jsonc`, `json5` (lossless in-house engine),
+//! `toml` (via `toml_edit`), `dotenv` and `ini` (line-based in-house
+//! parsers). Every format round-trips to itself byte-identically (within the
+//! documented limitations); anything unrepresentable becomes a `Warning`,
+//! never a silent drop.
 //!
 //! ```rust
 //! use cfgprism_formats::{all_formats, detect_format};
 //! assert_eq!(detect_format("cfg.json"), Some("json"));
+//! assert_eq!(detect_format("cfg.toml"), Some("toml"));
+//! assert_eq!(detect_format(".env"), Some("dotenv"));
 //! assert_eq!(detect_format("noext"), None);
-//! assert!(all_formats().find("json").is_some());
+//! assert!(all_formats().find("json5").is_some());
 //! ```
 
-mod json_stub;
+pub mod dotenv;
+pub mod ini;
+pub mod json;
+pub mod json5;
+pub mod jsonc;
+pub mod toml;
+pub mod util;
+
 mod registry;
 
-pub use json_stub::JsonStubFormat;
+pub use dotenv::DotenvFormat;
+pub use ini::IniFormat;
+pub use json::JsonFormat;
+pub use json5::Json5Format;
+pub use jsonc::JsoncFormat;
 pub use registry::{all_formats, detect_format, supported_names};
+pub use toml::TomlFormat;

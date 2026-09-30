@@ -1,0 +1,14 @@
+// File header comment.
+/* Multi-line
+   block comment. */
+{
+  // Key order is significant: z before a.
+  "z": 1, // inline on z
+
+  "a": [
+    1,
+    2, // trailing comma below is legal in JSONC
+  ],
+  "empty": {}, /* tail comment */
+}
+// Trailing comment.

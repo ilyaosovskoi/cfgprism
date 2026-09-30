@@ -1,16 +1,22 @@
 //! Format registry + extension sniffing.
 //!
-//! Format set is intentionally tiny in stage 1. Stage 2/3/5 extend
-//! `all_formats()` — the CLI and detection logic below do not change.
+//! `all_formats()` grows every stage; the CLI and detection logic do not change.
 
 use cfgprism_core::FormatRegistry;
 
-use crate::JsonStubFormat;
+use crate::{DotenvFormat, IniFormat, Json5Format, JsonFormat, JsoncFormat, TomlFormat};
 
-/// Build the registry with every supported format (stage-1 set).
+/// Build the registry with every supported format (help order).
 #[must_use]
 pub fn all_formats() -> FormatRegistry {
-    FormatRegistry::new(vec![JsonStubFormat::boxed()])
+    FormatRegistry::new(vec![
+        Box::new(JsonFormat),
+        Box::new(JsoncFormat),
+        Box::new(Json5Format),
+        Box::new(TomlFormat),
+        Box::new(DotenvFormat),
+        Box::new(IniFormat),
+    ])
 }
 
 /// Canonical supported names in help order.
@@ -19,25 +25,30 @@ pub fn supported_names() -> Vec<&'static str> {
     all_formats().names()
 }
 
-/// Guess the canonical format name from a file path extension.
+/// Guess the canonical format name from a file path.
 ///
-/// Returns `None` when there is no extension or it is unknown.
-/// Matching is case-insensitive; `stdin`/`-` never sniff.
+/// Extension match is case-insensitive; additionally the basename `.env`
+/// maps to `dotenv`. Returns `None` when nothing matches (`-`, stdin and
+/// unknown extensions). Reserved future extensions (yaml/yml/hcl/properties/
+/// kdl/ron) return `None` for now so the CLI reports "cannot detect" with a
+/// `-f/--from` hint instead of a misleading guess.
 #[must_use]
 pub fn detect_format(path: &str) -> Option<&'static str> {
     let file = path.rsplit('/').next().unwrap_or(path);
+    if file.eq_ignore_ascii_case(".env") {
+        return Some("dotenv");
+    }
     let ext = file.rsplit('.').next()?;
     if !file.contains('.') || ext.is_empty() {
         return None;
     }
-    // Keep in sync with `Format::extensions()` of every registered format.
-    // (Registry lookup by extension arrives with stage 2 when >1 format exists.)
     match ext.to_ascii_lowercase().as_str() {
         "json" => Some("json"),
-        // Reserved for upcoming stages — detected but reported as unsupported
-        // with a precise error instead of "cannot detect". See docs/DESIGN.md.
-        "jsonc" | "json5" | "toml" | "env" | "ini" | "yaml" | "yml" | "hcl" | "properties"
-        | "kdl" | "ron" => None,
+        "jsonc" => Some("jsonc"),
+        "json5" => Some("json5"),
+        "toml" => Some("toml"),
+        "env" => Some("dotenv"),
+        "ini" | "cfg" | "conf" => Some("ini"),
         _ => None,
     }
 }
@@ -47,15 +58,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_json_by_extension() {
+    fn detects_known_extensions() {
         assert_eq!(detect_format("cfg.json"), Some("json"));
         assert_eq!(detect_format("dir/CFG.JSON"), Some("json"));
+        assert_eq!(detect_format("a.jsonc"), Some("jsonc"));
+        assert_eq!(detect_format("a.json5"), Some("json5"));
+        assert_eq!(detect_format("Cargo.toml"), Some("toml"));
+        assert_eq!(detect_format("app.env"), Some("dotenv"));
+        assert_eq!(detect_format(".env"), Some("dotenv"));
+        assert_eq!(detect_format("setup.ini"), Some("ini"));
     }
 
     #[test]
     fn unknown_or_missing_extension_is_none() {
         assert_eq!(detect_format("noext"), None);
         assert_eq!(detect_format("cfg.xml"), None);
+        assert_eq!(detect_format("config.yaml"), None);
         assert_eq!(detect_format("-"), None);
     }
 }
