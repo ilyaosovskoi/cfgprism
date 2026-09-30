@@ -191,3 +191,61 @@ Alternatives. Ambiguities in the brief are resolved here, not in chat.
 - Alternatives: own line-based YAML parser (rejected — saphyr turns
   out-of-subset input into precise errors instead of misparses); source
   retention (rejected per D11).
+
+## D15. Cross-conversion rules (logical emitters) — 2026-09-30
+
+- Context: Stage 4 needs every pair to convert or fail precisely, never
+  silently drop. Same-format stays verbatim; cross pairs go logical.
+- Decision (`formats::convert_text` + `Format::emit_logical`):
+  - `<<` merges splice (missing keys only, transitive) and the marker is
+    dropped without warning (directive, not data); literal non-alias `<<`
+    keys are kept. Expansion recurses, so `json->json` on merge input is
+    stable. Anchor nodes expand with `AnchorExpanded` per node.
+  - Duplicates: JSON-family/YAML keep all entries (valid there);
+    TOML/dotenv/INI collapse last-wins + `UnsupportedConstruct`.
+  - Comment markers are normalized per target (`#`↔`//` via
+    `restyle_comment`); without it YAML `#` comments produce invalid JSONC
+    (caught by the matrix, fixed the same day).
+  - TOML/INI reorder values-before-tables/sections + `KeyReordered`;
+    dotted-looking keys are quoted (`"a.b"`) so they never reinterpret.
+  - Unrepresentable is an error, not a warning: nesting into dotenv,
+    deep nesting/arrays into INI, `null` into TOML, invalid key names.
+    Stringify (bool/number/datetime) into dotenv/INI is silent by
+    convention (untyped targets), like `configparser`.
+  - Datetime: `TypeCoerced` into JSON-family/YAML (re-parses as string),
+    kept raw into TOML, stringified silently into dotenv/INI.
+  - Verbatim fallbacks (programmatic IR) warn `AnchorExpanded` when anchor
+    syntax cannot survive (JSON pretty, TOML sliceless, dotenv/INI loops);
+    YAML routes programmatic docs to the canonical emitter (already warns).
+- Rationale: the 7×7 matrix (190+ pairs incl. 6 sample docs) asserts
+  `values_equal` (unordered where reordering is legal, stringified for
+  untyped ends) plus required-warning sets and clean-pair silence.
+- Alternatives: warning on every canonical normalization (rejected —
+  canonical output is expected on conversion; warnings mean real loss).
+
+## D16. Performance, fuzzing, hostile inputs — 2026-09-30
+
+- Context: quality bars demand 5 MB < 1 s and fuzz coverage; adversarial
+  tests found two real defects.
+- Decision:
+  - O(n²) span positions: per-node `offset_to_line_col` rescans hung 5 MB
+    YAML forever. Fixed with `core::LineIndex` (one pass + binary search).
+    Measured after the fix (release): 5 MB json→json 269 ms, yaml→yaml
+    0.8 s, toml→toml 0.4 s — all byte-identical, all < 1 s.
+  - `saphyr-parser` recurses per level and aborts past ~5k depth on small
+    stacks (bisected: saphyr alone, not our builder). Event collection now
+    runs on a scoped 256 MiB-stack worker thread (virtual, ~free); our own
+    builder guard (64) still bounds IR. 20k-deep input errors cleanly in
+    0.03 s. wasm32 runs inline (no threads; demo inputs are tiny).
+  - Fuzzing: `fuzz/` cargo-fuzz targets (json/toml/yaml, assert re-parse
+    stability) + nightly CI job (weekly schedule + parser changes). No
+    nightly locally, so targets are CI-gated; deterministic
+    `tests/adversarial.rs` (deep/truncated/hostile inputs, no-panic) runs
+    on stable in the main suite.
+  - JSON nesting cap 64 (D12) holds: 100 valid levels convert, 200 error
+    cleanly on 2 MiB test stacks.
+- Rationale: measured, not assumed — every number above reproduces via
+  `cargo test --release -p cfgprism-formats` and the criterion benches.
+- Alternatives: indent pre-scan for YAML depth (rejected — block-scalar
+  false positives, duplicates lexing); iterative saphyr use (impossible —
+  their recursion).

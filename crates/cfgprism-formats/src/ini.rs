@@ -323,6 +323,19 @@ fn emit_entry(
     path: &str,
     e: &Entry,
 ) -> Result<(), Error> {
+    // Parsed INI never carries anchors (no such syntax); any anchor here
+    // comes from a programmatic document and cannot be rendered.
+    if let Some(a) = &e.value.anchor {
+        warnings.push(Warning::new(
+            if path.is_empty() {
+                e.key.text.clone()
+            } else {
+                path.to_string()
+            },
+            WarningKind::AnchorExpanded,
+            format!("anchor '{}' expanded (INI has no anchors)", a.name),
+        ));
+    }
     if let Some(p) = e.key_trivia.prefix_raw.as_deref() {
         out.push_str(p);
     } else {
@@ -442,6 +455,182 @@ impl Format for IniFormat {
 
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
         emit_ini(doc, opt)
+    }
+
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+        emit_ini_logical(doc, opt)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Logical (canonical + warnings) emission for cross-format conversion.
+// ---------------------------------------------------------------------------
+
+/// Canonical INI: global scalars, one level of sections. Deeper nesting,
+/// arrays and invalid names are precise errors; other scalars stringify.
+pub fn emit_ini_logical(doc: &Doc, _opt: &Options) -> Result<EmitOutput, Error> {
+    let Value::Map(entries) = &doc.root.value else {
+        return Err(Error::emit("ini root must be a map"));
+    };
+    let mut warnings = Vec::new();
+    let flat = crate::logical::expand_entries(entries, "", true, &mut warnings);
+    let mut out = String::new();
+    for c in &doc.root.trivia.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    // Globals must precede sections (a global after `[s]` would join `s`);
+    // reorder with a warning when the source interleaves them.
+    let mut globals: Vec<&Entry> = Vec::new();
+    let mut sections: Vec<&Entry> = Vec::new();
+    let mut seen_section = false;
+    let mut reordered = false;
+    for e in &flat {
+        if matches!(e.value.value, Value::Map(_)) {
+            sections.push(e);
+            seen_section = true;
+        } else {
+            globals.push(e);
+            if seen_section {
+                reordered = true;
+            }
+        }
+    }
+    if reordered {
+        warnings.push(Warning::new(
+            "",
+            WarningKind::KeyReordered,
+            "keys reordered: INI globals must precede sections",
+        ));
+    }
+    for e in globals {
+        match &e.value.value {
+            Value::Map(_) => emit_ini_section(&mut out, &mut warnings, e)?,
+            _ => emit_ini_kv(&mut out, &mut warnings, "", e)?,
+        }
+    }
+    for e in sections {
+        emit_ini_section(&mut out, &mut warnings, e)?;
+    }
+    for c in &doc.trailing.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    Ok(EmitOutput {
+        text: out,
+        warnings,
+    })
+}
+
+fn emit_ini_section(out: &mut String, warnings: &mut Vec<Warning>, e: &Entry) -> Result<(), Error> {
+    check_ini_name(&e.key.text, "section")?;
+    if let Some(a) = &e.value.anchor {
+        warnings.push(Warning::new(
+            &e.key.text,
+            WarningKind::AnchorExpanded,
+            format!("anchor '{}' expanded (INI has no anchors)", a.name),
+        ));
+    }
+    for _ in 0..e.key_trivia.blanks_before {
+        out.push('\n');
+    }
+    for c in &e.key_trivia.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out.push('[');
+    out.push_str(&e.key.text);
+    out.push(']');
+    if let Some(c) = &e.value.trivia.inline {
+        out.push(' ');
+        out.push_str(&crate::logical::restyle_comment(c, "#").join(" "));
+    }
+    out.push('\n');
+    let Value::Map(children) = &e.value.value else {
+        return Err(Error::emit("internal: section without map"));
+    };
+    let flat = crate::logical::expand_entries(children, &e.key.text, true, warnings);
+    for c in &flat {
+        emit_ini_kv(out, warnings, &e.key.text, c)?;
+    }
+    Ok(())
+}
+
+fn emit_ini_kv(
+    out: &mut String,
+    warnings: &mut Vec<Warning>,
+    section: &str,
+    e: &Entry,
+) -> Result<(), Error> {
+    check_ini_name(&e.key.text, "key")?;
+    let path = if section.is_empty() {
+        e.key.text.clone()
+    } else {
+        format!("{section}.{}", e.key.text)
+    };
+    if let Some(a) = &e.value.anchor {
+        warnings.push(Warning::new(
+            &path,
+            WarningKind::AnchorExpanded,
+            format!("anchor '{}' expanded (INI has no anchors)", a.name),
+        ));
+    }
+    for _ in 0..e.key_trivia.blanks_before {
+        out.push('\n');
+    }
+    for c in &e.key_trivia.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out.push_str(&e.key.text);
+    out.push_str(" = ");
+    let text = ini_string(&e.value).map_err(|m| Error::emit(format!("{m} ({path})")))?;
+    // Multiline values become indented continuations.
+    let mut lines = text.split('\n');
+    out.push_str(lines.next().unwrap_or(""));
+    if let Some(c) = &e.value.trivia.inline {
+        out.push(' ');
+        out.push_str(&crate::logical::restyle_comment(c, "#").join(" "));
+    }
+    out.push('\n');
+    for line in lines {
+        out.push_str("  ");
+        out.push_str(line);
+        out.push('\n');
+    }
+    Ok(())
+}
+
+fn check_ini_name(name: &str, what: &str) -> Result<(), Error> {
+    if name.is_empty() || name.contains(['=', ':', '\n', '\r', '[', ']']) {
+        return Err(Error::emit(format!("invalid INI {what} name '{name}'")));
+    }
+    if name.trim_start().starts_with([';', '#']) {
+        return Err(Error::emit(format!("invalid INI {what} name '{name}'")));
+    }
+    Ok(())
+}
+
+/// INI values are text: stringify scalars, reject containers.
+fn ini_string(node: &Node) -> Result<String, String> {
+    match &node.value {
+        Value::Null => Ok(String::new()),
+        Value::Bool(b) => Ok(b.to_string()),
+        Value::Number(n) => Ok(n.raw.clone()),
+        Value::Str(s) => Ok(s.clone()),
+        Value::Datetime(d) => Ok(d.clone()),
+        Value::Array(_) | Value::Map(_) => {
+            Err("nested values have no INI representation".to_string())
+        }
+        _ => Err("unexpected value kind in INI output".to_string()),
     }
 }
 

@@ -4,7 +4,7 @@
 
 use cfgprism_core::{Doc, EmitOutput, Error, Format, Options};
 
-use crate::json::{emit_json, parse_json, JSONC_DIALECT};
+use crate::json::{emit_json, emit_json_logical, parse_json, JsonComments, JSONC_DIALECT};
 
 /// JSON with comments (VS Code `*.jsonc`, `tsconfig`-style).
 pub struct JsoncFormat;
@@ -24,5 +24,9 @@ impl Format for JsoncFormat {
 
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
         emit_json(doc, opt)
+    }
+
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+        emit_json_logical(doc, opt, JsonComments::Keep, false)
     }
 }

@@ -1263,6 +1263,15 @@ struct Emitter<'a> {
 impl<'a> Emitter<'a> {
     /// Logical fallback for a scalar without verbatim spelling.
     fn pretty_scalar(&mut self, path: &str, node: &Node) -> Result<String, Error> {
+        // Reached only without a verbatim spelling (programmatic docs);
+        // anchor syntax cannot survive here.
+        if let Some(a) = &node.anchor {
+            self.warnings.push(Warning::new(
+                path,
+                WarningKind::AnchorExpanded,
+                format!("anchor '{}' expanded (no verbatim spelling)", a.name),
+            ));
+        }
         match &node.value {
             Value::Null => Ok("null".to_string()),
             Value::Bool(b) => Ok(b.to_string()),
@@ -1346,6 +1355,14 @@ impl<'a> Emitter<'a> {
     /// Drops logical comments with explicit warnings — never silently.
     fn pretty_container(&mut self, path: &str, node: &Node, level: usize) -> Result<String, Error> {
         self.warn_trivia(path, &node.trivia);
+        // Reached only without verbatim slices (programmatic docs).
+        if let Some(a) = &node.anchor {
+            self.warnings.push(Warning::new(
+                path,
+                WarningKind::AnchorExpanded,
+                format!("anchor '{}' expanded (no verbatim spelling)", a.name),
+            ));
+        }
         let pad = " ".repeat(self.opt.indent.max(1) * level);
         let pad_in = " ".repeat(self.opt.indent.max(1) * (level + 1));
         match &node.value {
@@ -1476,6 +1493,212 @@ impl Format for JsonFormat {
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
         emit_json(doc, opt)
     }
+
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+        emit_json_logical(doc, opt, JsonComments::Strip, false)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Logical (canonical + warnings) emission for cross-format conversion.
+// ---------------------------------------------------------------------------
+
+/// Comment policy for logical JSON output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JsonComments {
+    /// Strict JSON: comments cannot be represented — dropped with warnings.
+    Strip,
+    /// JSONC/JSON5: comments preserved verbatim (markers travel in the IR).
+    Keep,
+}
+
+/// Canonical logical emitter: verbatim slices ignored, values re-rendered,
+/// losses reported. Used for every cross-format pair targeting JSON-family.
+pub fn emit_json_logical(
+    doc: &Doc,
+    opt: &Options,
+    comments: JsonComments,
+    unquoted_keys: bool,
+) -> Result<EmitOutput, Error> {
+    let mut w = LogicalEmitter {
+        indent: opt.indent.max(1),
+        comments,
+        unquoted_keys,
+        warnings: Vec::new(),
+    };
+    let mut out = String::new();
+    w.emit_trivia_top(&mut out, &doc.root.trivia, 0);
+    out.push_str(&w.value(&doc.root, "", 0)?);
+    out.push('\n');
+    w.emit_trailing(&mut out, &doc.trailing);
+    Ok(EmitOutput {
+        text: out,
+        warnings: w.warnings,
+    })
+}
+
+struct LogicalEmitter {
+    indent: usize,
+    comments: JsonComments,
+    unquoted_keys: bool,
+    warnings: Vec<Warning>,
+}
+
+impl LogicalEmitter {
+    fn pad(&self, level: usize) -> String {
+        " ".repeat(self.indent * level)
+    }
+
+    fn warn_anchor(&mut self, path: &str, node: &Node) {
+        if let Some(a) = &node.anchor {
+            self.warnings.push(Warning::new(
+                path,
+                WarningKind::AnchorExpanded,
+                format!("anchor '{}' expanded (JSON has no anchors)", a.name),
+            ));
+        }
+    }
+
+    /// Leading comments of a node: emit (Keep) or warn once (Strip).
+    fn leading(&mut self, out: &mut String, path: &str, t: &Trivia, level: usize) {
+        if t.leading.is_empty() {
+            return;
+        }
+        match self.comments {
+            JsonComments::Keep => {
+                for c in &t.leading {
+                    for line in crate::logical::restyle_comment(c, "//") {
+                        out.push_str(&self.pad(level));
+                        out.push_str(&line);
+                        out.push('\n');
+                    }
+                }
+            }
+            JsonComments::Strip => {
+                self.warnings.push(Warning::new(
+                    path,
+                    WarningKind::CommentDropped,
+                    format!(
+                        "{} comment(s) dropped (strict JSON has no comments)",
+                        t.leading.len()
+                    ),
+                ));
+            }
+        }
+    }
+
+    fn inline_suffix(&mut self, path: &str, t: &Trivia) -> String {
+        match (&t.inline, self.comments) {
+            (Some(c), JsonComments::Keep) => {
+                let line = crate::logical::restyle_comment(c, "//").join(" ");
+                format!(" {line}")
+            }
+            (Some(_), JsonComments::Strip) => {
+                self.warnings.push(Warning::new(
+                    path,
+                    WarningKind::CommentDropped,
+                    "inline comment dropped (strict JSON has no comments)",
+                ));
+                String::new()
+            }
+            (None, _) => String::new(),
+        }
+    }
+
+    fn emit_trivia_top(&mut self, out: &mut String, t: &Trivia, level: usize) {
+        self.leading(out, "", t, level);
+    }
+
+    fn emit_trailing(&mut self, out: &mut String, t: &Trivia) {
+        // Trailing file comments behave like top-level leading ones.
+        self.leading(out, "", t, 0);
+        if t.inline.is_some() {
+            let s = self.inline_suffix("", t);
+            if !s.is_empty() {
+                out.push_str(s.trim_start());
+                out.push('\n');
+            }
+        }
+    }
+
+    fn value(&mut self, node: &Node, path: &str, level: usize) -> Result<String, Error> {
+        self.warn_anchor(path, node);
+        match &node.value {
+            Value::Null => Ok("null".to_string()),
+            Value::Bool(b) => Ok(b.to_string()),
+            Value::Number(n) => Ok(n.raw.clone()),
+            Value::Str(s) => Ok(escape_json(s)),
+            Value::Datetime(d) => {
+                self.warnings.push(Warning::new(
+                    path,
+                    WarningKind::TypeCoerced,
+                    "datetime has no JSON representation; emitted as string",
+                ));
+                Ok(escape_json(d))
+            }
+            Value::Array(items) => {
+                if items.is_empty() {
+                    return Ok("[]".to_string());
+                }
+                let mut out = String::from("[\n");
+                for (i, item) in items.iter().enumerate() {
+                    self.leading(&mut out, path, &item.trivia, level + 1);
+                    out.push_str(&self.pad(level + 1));
+                    out.push_str(&self.value(item, path, level + 1)?);
+                    if i + 1 < items.len() {
+                        out.push(',');
+                    }
+                    out.push_str(&self.inline_suffix(path, &item.trivia));
+                    out.push('\n');
+                }
+                out.push_str(&self.pad(level));
+                out.push(']');
+                Ok(out)
+            }
+            Value::Map(entries) => {
+                let flat = crate::logical::expand_entries(entries, path, false, &mut self.warnings);
+                if flat.is_empty() {
+                    return Ok("{}".to_string());
+                }
+                let mut out = String::from("{\n");
+                for (i, e) in flat.iter().enumerate() {
+                    let epath = join_path(path, &e.key.text);
+                    self.leading(&mut out, &epath, &e.key_trivia, level + 1);
+                    out.push_str(&self.pad(level + 1));
+                    out.push_str(&self.key(&e.key.text));
+                    out.push_str(": ");
+                    out.push_str(&self.value(&e.value, &epath, level + 1)?);
+                    if i + 1 < flat.len() {
+                        out.push(',');
+                    }
+                    out.push_str(&self.inline_suffix(&epath, &e.value.trivia));
+                    out.push('\n');
+                }
+                out.push_str(&self.pad(level));
+                out.push('}');
+                Ok(out)
+            }
+            _ => Err(Error::emit("unexpected value kind in JSON output")),
+        }
+    }
+
+    fn key(&self, text: &str) -> String {
+        if self.unquoted_keys && is_json5_ident(text) {
+            text.to_string()
+        } else {
+            escape_json(text)
+        }
+    }
+}
+
+fn is_json5_ident(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {}
+        _ => return false,
+    }
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
 }
 
 #[cfg(test)]

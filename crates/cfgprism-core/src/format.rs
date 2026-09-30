@@ -10,6 +10,9 @@
 //! #   fn emit(&self, doc: &Doc, _opt: &Options) -> Result<EmitOutput, cfgprism_core::Error> {
 //! #     Ok(EmitOutput { text: "x".into(), warnings: vec![] })
 //! #   }
+//! #   fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, cfgprism_core::Error> {
+//! #     self.emit(doc, opt)
+//! #   }
 //! # }
 //! let r = FormatRegistry::new(vec![Box::new(Echo)]);
 //! assert!(r.find("echo").is_some());
@@ -42,7 +45,8 @@ pub struct ConvertOutput {
 ///
 /// Rules: `parse` must fail with a line:col `Error` on bad input and must
 /// preserve source order in `Doc`; `emit` must never drop comments/styles
-/// silently — every loss becomes a `Warning`.
+/// silently — every loss becomes a `Warning`. `emit_logical` renders any IR
+/// canonically for cross-format conversion (verbatim slices ignored).
 pub trait Format {
     /// Canonical lowercase name (`"json"`, `"toml"`, …).
     fn name(&self) -> &'static str;
@@ -52,6 +56,8 @@ pub trait Format {
     fn parse(&self, src: &str) -> Result<Doc, Error>;
     /// Emit IR back to text, collecting warnings.
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error>;
+    /// Emit any IR canonically (used when the source format differs).
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error>;
 }
 
 /// Name → format lookup used by the CLI (`-f`/`-t` and extension sniffing).
@@ -122,6 +128,9 @@ mod tests {
                 text,
                 warnings: Vec::new(),
             })
+        }
+        fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+            self.emit(doc, opt)
         }
     }
 

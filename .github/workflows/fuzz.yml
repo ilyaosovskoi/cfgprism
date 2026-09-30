@@ -1,0 +1,28 @@
+name: fuzz
+
+on:
+  push:
+    paths:
+      - "crates/cfgprism-formats/**"
+      - "crates/cfgprism-core/**"
+      - "fuzz/**"
+  pull_request:
+    paths:
+      - "crates/cfgprism-formats/**"
+      - "crates/cfgprism-core/**"
+      - "fuzz/**"
+  schedule:
+    - cron: "0 4 * * 0" # weekly, Sunday 04:00 UTC
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [fuzz_json, fuzz_toml, fuzz_yaml]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo install cargo-fuzz --locked
+      - run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=300 -max_len=65536
+        working-directory: fuzz

@@ -6,7 +6,7 @@
 
 use cfgprism_core::{Doc, EmitOutput, Error, Format, Options};
 
-use crate::json::{emit_json, parse_json, JSON5_DIALECT};
+use crate::json::{emit_json, emit_json_logical, parse_json, JsonComments, JSON5_DIALECT};
 
 /// JSON5 (`*.json5`).
 pub struct Json5Format;
@@ -26,5 +26,9 @@ impl Format for Json5Format {
 
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
         emit_json(doc, opt)
+    }
+
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+        emit_json_logical(doc, opt, JsonComments::Keep, true)
     }
 }

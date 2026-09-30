@@ -1,0 +1,25 @@
+[package]
+name = "cfgprism-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cfgprism-core = { path = "../crates/cfgprism-core" }
+cfgprism-formats = { path = "../crates/cfgprism-formats" }
+
+[[bin]]
+name = "fuzz_json"
+path = "fuzz_targets/fuzz_json.rs"
+
+[[bin]]
+name = "fuzz_toml"
+path = "fuzz_targets/fuzz_toml.rs"
+
+[[bin]]
+name = "fuzz_yaml"
+path = "fuzz_targets/fuzz_yaml.rs"

@@ -5,6 +5,7 @@ members = [
     "crates/cfgprism-cli",
     "crates/cfgprism-wasm",
 ]
+exclude = ["fuzz"]
 resolver = "2"
 
 [workspace.package]

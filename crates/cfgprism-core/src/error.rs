@@ -140,18 +140,42 @@ impl fmt::Display for Error {
 /// Offsets past the end clamp to the last position; always >= 1:1.
 #[must_use]
 pub fn offset_to_line_col(src: &str, offset: usize) -> LineCol {
-    let offset = offset.min(src.len());
-    let mut line = 1_u32;
-    let mut col = 1_u32;
-    for b in src.as_bytes().iter().take(offset) {
-        if *b == b'\n' {
-            line = line.saturating_add(1);
-            col = 1;
-        } else {
-            col = col.saturating_add(1);
+    LineIndex::new(src).line_col(offset)
+}
+
+/// Precomputed line-start index for O(log n) offset→position lookups.
+/// Per-node spans on big documents must use this: rescanning from zero per
+/// node is O(n²) (measured: 5 MB YAML never finishes).
+#[derive(Debug, Clone)]
+pub struct LineIndex {
+    /// Byte offset of each line's first byte; always starts with 0.
+    starts: Vec<usize>,
+}
+
+impl LineIndex {
+    /// Build the index in one O(n) pass.
+    #[must_use]
+    pub fn new(src: &str) -> Self {
+        let mut starts = vec![0];
+        for (i, b) in src.as_bytes().iter().enumerate() {
+            if *b == b'\n' {
+                starts.push(i + 1);
+            }
+        }
+        Self { starts }
+    }
+
+    /// 1-based line:col for `offset` (clamped to the source end).
+    #[must_use]
+    pub fn line_col(&self, offset: usize) -> LineCol {
+        let line = self.starts.partition_point(|&s| s <= offset);
+        let line = line.max(1);
+        let start = self.starts.get(line - 1).copied().unwrap_or(0);
+        LineCol {
+            line: line as u32,
+            col: (offset.saturating_sub(start) + 1) as u32,
         }
     }
-    LineCol { line, col }
 }
 
 #[cfg(test)]

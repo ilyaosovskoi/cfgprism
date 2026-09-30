@@ -11,8 +11,8 @@ use std::io::{IsTerminal, Read};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use cfgprism_core::{convert, Error, Options};
-use cfgprism_formats::{all_formats, detect_format, supported_names};
+use cfgprism_core::{Error, Options};
+use cfgprism_formats::{convert_text, detect_format, supported_names};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -86,8 +86,6 @@ fn run() -> Result<(), Error> {
 }
 
 fn run_convert(a: ConvertArgs) -> Result<(), Error> {
-    let registry = all_formats();
-
     let src = read_input(a.input.as_deref())?;
 
     let from_name = match a.from {
@@ -112,24 +110,17 @@ fn run_convert(a: ConvertArgs) -> Result<(), Error> {
         },
     };
 
-    let from = registry.find(&from_name).ok_or_else(|| {
-        Error::unsupported_format(format!(
-            "unsupported source format '{from_name}' (supported: {})",
-            supported_names().join(", ")
-        ))
-    })?;
-    let to = registry.find(&a.to).ok_or_else(|| {
-        Error::unsupported_format(format!(
-            "unsupported target format '{}' (supported: {})",
-            a.to,
-            supported_names().join(", ")
-        ))
-    })?;
-
     let opt = Options {
         indent: a.indent.max(1),
     };
-    let out = convert(from, to, &src, &opt)?;
+    // convert_text validates format names and reports supported lists.
+    let out = convert_text(&from_name, &a.to, &src, &opt).map_err(|e| {
+        if matches!(e.kind, cfgprism_core::ErrorKind::UnsupportedFormat) {
+            Error::unsupported_format(format!("{e} (supported: {})", supported_names().join(", ")))
+        } else {
+            e
+        }
+    })?;
 
     for w in &out.warnings {
         eprintln!("cfgprism: warning: {w}");

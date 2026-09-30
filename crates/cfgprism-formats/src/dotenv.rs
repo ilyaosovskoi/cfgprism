@@ -243,6 +243,15 @@ pub fn emit_dotenv(doc: &Doc, _opt: &Options) -> Result<EmitOutput, Error> {
     let mut warnings = Vec::new();
     let mut out = doc.root.trivia.prefix_raw.clone().unwrap_or_default();
     for e in entries {
+        // Parsed dotenv never carries anchors (no such syntax); any anchor
+        // here comes from a programmatic document and cannot be rendered.
+        if let Some(a) = &e.value.anchor {
+            warnings.push(Warning::new(
+                &e.key.text,
+                WarningKind::AnchorExpanded,
+                format!("anchor '{}' expanded (dotenv has no anchors)", a.name),
+            ));
+        }
         if let Some(p) = e.key_trivia.prefix_raw.as_deref() {
             out.push_str(p);
         } else {
@@ -322,6 +331,137 @@ impl Format for DotenvFormat {
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
         emit_dotenv(doc, opt)
     }
+
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+        emit_dotenv_logical(doc, opt)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Logical (canonical + warnings) emission for cross-format conversion.
+// ---------------------------------------------------------------------------
+
+/// Canonical dotenv: flat string map. Nested values and invalid key names
+/// are precise errors (dotenv cannot represent them); scalars stringify.
+pub fn emit_dotenv_logical(doc: &Doc, _opt: &Options) -> Result<EmitOutput, Error> {
+    let Value::Map(entries) = &doc.root.value else {
+        return Err(Error::emit("dotenv root must be a map"));
+    };
+    let mut warnings = Vec::new();
+    let flat = crate::logical::expand_entries(entries, "", true, &mut warnings);
+    let mut out = String::new();
+    for c in &doc.root.trivia.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    for e in &flat {
+        emit_env_entry(&mut out, &mut warnings, e)?;
+    }
+    for c in &doc.trailing.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    Ok(EmitOutput {
+        text: out,
+        warnings,
+    })
+}
+
+fn emit_env_entry(out: &mut String, warnings: &mut Vec<Warning>, e: &Entry) -> Result<(), Error> {
+    if !is_env_key(&e.key.text) {
+        return Err(Error::emit(format!(
+            "key '{}' is not a valid dotenv name",
+            e.key.text
+        )));
+    }
+    let path = e.key.text.clone();
+    if let Some(a) = &e.value.anchor {
+        warnings.push(Warning::new(
+            &path,
+            WarningKind::AnchorExpanded,
+            format!("anchor '{}' expanded (dotenv has no anchors)", a.name),
+        ));
+    }
+    for _ in 0..e.key_trivia.blanks_before {
+        out.push('\n');
+    }
+    for c in &e.key_trivia.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out.push_str(&e.key.text);
+    out.push('=');
+    out.push_str(&env_string(&e.value)?);
+    if let Some(c) = &e.value.trivia.inline {
+        out.push(' ');
+        out.push_str(&crate::logical::restyle_comment(c, "#").join(" "));
+    }
+    out.push('\n');
+    let _ = warnings;
+    Ok(())
+}
+
+fn is_env_key(key: &str) -> bool {
+    let mut chars = key.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Canonical dotenv value rendering (double-quoted when required).
+fn env_string(node: &Node) -> Result<String, Error> {
+    let text = match &node.value {
+        Value::Null => String::new(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.raw.clone(),
+        Value::Str(s) => s.clone(),
+        Value::Datetime(d) => d.clone(),
+        Value::Array(_) | Value::Map(_) => {
+            return Err(Error::emit("nested values have no dotenv representation"));
+        }
+        _ => {
+            return Err(Error::emit("unexpected value kind in dotenv output"));
+        }
+    };
+    if text.is_empty() {
+        return Ok(String::new());
+    }
+    if env_needs_quotes(&text) {
+        return Ok(format!("\"{}\"", env_escape(&text)));
+    }
+    Ok(text)
+}
+
+fn env_needs_quotes(s: &str) -> bool {
+    if s.trim() != s {
+        return true;
+    }
+    s.chars()
+        .any(|c| matches!(c, ' ' | '\t' | '#' | '\'' | '"' | '\n' | '\r'))
+}
+
+fn env_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

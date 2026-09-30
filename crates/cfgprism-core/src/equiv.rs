@@ -12,7 +12,7 @@
 //! assert!(values_equal(&a, &b));
 //! ```
 
-use crate::doc::{Node, Value};
+use crate::doc::{Entry, Node, Value};
 
 /// `true` when two nodes carry the same logical value.
 /// Maps compare key-by-key **in order**; everything rendering-related
@@ -39,6 +39,39 @@ fn values_equal_inner(a: &Value, b: &Value) -> bool {
                     .all(|(p, q)| p.key.text == q.key.text && values_equal(&p.value, &q.value))
         }
         _ => false,
+    }
+}
+
+/// `true` when two nodes carry the same logical value, ignoring map entry
+/// order (arrays stay ordered). Used for targets that legitimately reorder
+/// (TOML sections after values). See [`values_equal`] for the ordered form.
+#[must_use]
+pub fn values_equal_unordered(a: &Node, b: &Node) -> bool {
+    values_unordered_inner(&a.value, &b.value)
+}
+
+fn values_unordered_inner(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y.iter()).all(|(p, q)| values_equal(p, q))
+        }
+        (Value::Map(x), Value::Map(y)) => {
+            if x.len() != y.len() {
+                return false;
+            }
+            let mut ys: Vec<&Entry> = y.iter().collect();
+            for e in x {
+                let Some(pos) = ys.iter().position(|o| o.key.text == e.key.text) else {
+                    return false;
+                };
+                let other = ys.remove(pos);
+                if !values_equal(&e.value, &other.value) {
+                    return false;
+                }
+            }
+            true
+        }
+        _ => values_equal_inner(a, b),
     }
 }
 

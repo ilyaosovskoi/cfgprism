@@ -73,6 +73,8 @@ struct Builder<'a> {
     order: usize,
     /// Byte offset where the next prefix slice starts.
     cursor: usize,
+    /// Shared line index for O(log n) span positions (see core docs).
+    lines: cfgprism_core::LineIndex,
 }
 
 impl<'a> Builder<'a> {
@@ -391,7 +393,7 @@ impl<'a> Builder<'a> {
         let mut node = Node::new(value);
         node.style = Style::Original(raw);
         node.order = self.next_order();
-        node.span = Some(core_span(self.src, span));
+        node.span = Some(self.span_of(span));
         let suffix = self.same_line_suffix(span.1).to_string();
         Self::fill_trivia(&mut node, None, Some(&suffix));
         node.trivia.suffix_raw = Some(suffix);
@@ -421,7 +423,7 @@ impl<'a> Builder<'a> {
         let mut node = Node::new(target.value);
         node.style = Style::Original(raw);
         node.order = self.next_order();
-        node.span = Some(core_span(self.src, span));
+        node.span = Some(self.span_of(span));
         let suffix = self.same_line_suffix(span.1).to_string();
         Self::fill_trivia(&mut node, None, Some(&suffix));
         node.trivia.suffix_raw = Some(suffix);
@@ -458,7 +460,7 @@ impl<'a> Builder<'a> {
                     let mut n = Node::new(Value::Array(items));
                     n.style = Style::Unknown;
                     n.order = self.next_order();
-                    n.span = Some(core_span(self.src, (seq_start, end)));
+                    n.span = Some(self.span_of((seq_start, end)));
                     return Ok(Built {
                         node: n,
                         span: (seq_start, end),
@@ -518,7 +520,7 @@ impl<'a> Builder<'a> {
                     let mut n = Node::new(Value::Map(entries));
                     n.style = Style::Unknown;
                     n.order = self.next_order();
-                    n.span = Some(core_span(self.src, (map_start, end)));
+                    n.span = Some(self.span_of((map_start, end)));
                     return Ok(Built {
                         node: n,
                         span: (map_start, end),
@@ -622,7 +624,7 @@ impl<'a> Builder<'a> {
                     let mut n = Node::new(Value::Array(items));
                     n.style = Style::Flow;
                     n.order = self.next_order();
-                    n.span = Some(core_span(self.src, (open_start, espan.1)));
+                    n.span = Some(self.span_of((open_start, espan.1)));
                     match open_raw.take() {
                         Some(o) => {
                             n.open_raw = Some(o);
@@ -711,7 +713,7 @@ impl<'a> Builder<'a> {
                     let mut n = Node::new(Value::Map(entries));
                     n.style = Style::Flow;
                     n.order = self.next_order();
-                    n.span = Some(core_span(self.src, (open_start, espan.1)));
+                    n.span = Some(self.span_of((open_start, espan.1)));
                     match open_raw.take() {
                         Some(o) => {
                             n.open_raw = Some(o);
@@ -880,10 +882,13 @@ fn anchor_at_end(line: &str) -> Option<String> {
     Some(name)
 }
 
-fn core_span(src: &str, span: ByteSpan) -> cfgprism_core::Span {
-    let s = offset_to_line_col(src, span.0.min(src.len()));
-    let e = offset_to_line_col(src, span.1.min(src.len()));
-    cfgprism_core::Span { start: s, end: e }
+impl Builder<'_> {
+    fn span_of(&self, span: ByteSpan) -> cfgprism_core::Span {
+        let len = self.src.len();
+        let s = self.lines.line_col(span.0.min(len));
+        let e = self.lines.line_col(span.1.min(len));
+        cfgprism_core::Span { start: s, end: e }
+    }
 }
 
 /// YAML 1.2 core-schema plain scalar resolution.
@@ -970,27 +975,63 @@ fn parse_yaml_float(text: &str) -> Option<()> {
     }
 }
 
+/// `saphyr-parser` recurses per nesting level and overflows fixed-size
+/// stacks on hostile depth (~5k `- ` levels abort a 2 MiB test stack, found
+/// by the adversarial suite; debug frames run ~8 KiB/level). The event load
+/// therefore runs on a worker thread with a 256 MiB stack — virtual address
+/// space, committed on demand, so the cost is ~zero for normal inputs.
+/// [`Builder`] depth (64) still bounds our own recursion afterwards, so IR
+/// and emission never see hostile depth. On wasm32 threads do not exist, so
+/// collection runs inline there (web-demo inputs are small; noted in the
+/// stage-7 docs).
+fn collect_events<'a>(src: &'a str) -> Result<Vec<RawEv<'a>>, Error> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut out: Option<Result<Vec<RawEv<'a>>, Error>> = None;
+        std::thread::scope(|scope| {
+            let handle = std::thread::Builder::new()
+                .name("cfgprism-yaml-load".to_string())
+                .stack_size(256 << 20)
+                .spawn_scoped(scope, || run_load(src))
+                .map_err(|e| Error::io(format!("cannot spawn YAML worker thread: {e}")))?;
+            out = Some(
+                handle
+                    .join()
+                    .map_err(|_| Error::emit("YAML parser failed internally on hostile input"))?,
+            );
+            Ok::<(), Error>(())
+        })?;
+        out.unwrap_or(Err(Error::io("YAML worker thread did not run")))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        run_load(src)
+    }
+}
+
+fn run_load(src: &str) -> Result<Vec<RawEv<'_>>, Error> {
+    let mut collector = Collector { evs: Vec::new() };
+    let mut parser = Parser::new_from_str(src);
+    parser.load(&mut collector, true).map_err(|e| {
+        let m = e.marker();
+        Error::parse(
+            m.line().max(1) as u32,
+            (m.col() + 1).max(1) as u32,
+            e.to_string()
+                .lines()
+                .next()
+                .unwrap_or("invalid YAML")
+                .trim()
+                .to_string(),
+        )
+    })?;
+    Ok(collector.evs)
+}
+
 /// Parse YAML source into an IR document.
 pub fn parse_yaml(src: &str) -> Result<Doc, Error> {
-    let mut collector = Collector { evs: Vec::new() };
-    {
-        let mut parser = Parser::new_from_str(src);
-        parser.load(&mut collector, true).map_err(|e| {
-            let m = e.marker();
-            Error::parse(
-                m.line().max(1) as u32,
-                (m.col() + 1).max(1) as u32,
-                e.to_string()
-                    .lines()
-                    .next()
-                    .unwrap_or("invalid YAML")
-                    .trim()
-                    .to_string(),
-            )
-        })?;
-    }
+    let collector = collect_events(src)?;
     let doc_pos = collector
-        .evs
         .iter()
         .position(|r| matches!(r.ev, Event::DocumentStart(_)));
     let Some(doc_pos) = doc_pos else {
@@ -1000,9 +1041,11 @@ pub fn parse_yaml(src: &str) -> Result<Doc, Error> {
         doc.trailing.leading = Builder::gap_comments(src);
         return Ok(doc);
     };
+    let lines = cfgprism_core::LineIndex::new(src);
     let mut b = Builder {
         src,
-        evs: collector.evs,
+        evs: collector,
+        lines,
         pos: doc_pos + 1, // consume DocumentStart
         anchors: HashMap::new(),
         anchor_names: HashMap::new(),
@@ -1183,8 +1226,9 @@ impl YamlEmitter {
         Ok(out)
     }
 
-    /// Canonical block emitter for programmatic documents (also used when
-    /// isolated subtrees lack slices). Anchors expand inline with a warning.
+    /// Canonical block emitter for programmatic documents and cross-format
+    /// output. Comments are preserved (leading lines, inline suffixes);
+    /// anchors expand inline with a warning; `<<` merges splice.
     fn emit_canonical(&mut self, node: &Node, path: &str, level: usize) -> Result<String, Error> {
         if let Some(a) = &node.anchor {
             self.warn(
@@ -1193,7 +1237,9 @@ impl YamlEmitter {
                 format!("anchor '{}' expanded in canonical output", a.name),
             );
         }
-        self.warn_trivia(path, &node.trivia);
+        // Note: no generic trivia warning here. Every trivia slot has an
+        // owner that either emits it (parents handle keys/items/values) or
+        // warns explicitly (key inline comments).
         let pad = " ".repeat(self.indent * level);
         match &node.value {
             Value::Null => Ok("null".to_string()),
@@ -1207,14 +1253,16 @@ impl YamlEmitter {
                 }
                 let mut out = String::new();
                 for item in items {
-                    self.warn_trivia(path, &item.trivia);
+                    self.emit_blanks_leading(&mut out, path, &item.trivia, &pad);
                     if is_container(item) {
                         let child = self.emit_canonical(item, path, level + 1)?;
                         if child == "{}" || child == "[]" {
                             // Empty containers stay inline.
-                            out.push_str(&format!("{pad}- {child}\n"));
+                            out.push_str(&format!("{pad}- {child}"));
                         } else {
-                            out.push_str(&format!("{pad}-\n"));
+                            out.push_str(&format!("{pad}-"));
+                            out.push_str(&self.inline_of(&item.trivia));
+                            out.push('\n');
                             for line in child.lines() {
                                 out.push_str(&format!(
                                     "{}{}\n",
@@ -1222,13 +1270,16 @@ impl YamlEmitter {
                                     line
                                 ));
                             }
+                            continue;
                         }
                     } else {
                         let inline = self.emit_canonical(item, path, 0)?;
                         // Multiline scalars render as indented literal blocks.
                         let inline = indent_literal(&inline, self.indent * (level + 1));
-                        out.push_str(&format!("{pad}- {inline}\n"));
+                        out.push_str(&format!("{pad}- {inline}"));
                     }
+                    out.push_str(&self.inline_of(&item.trivia));
+                    out.push('\n');
                 }
                 Ok(out.trim_end().to_string())
             }
@@ -1236,29 +1287,40 @@ impl YamlEmitter {
                 if entries.is_empty() {
                     return Ok("{}".to_string());
                 }
+                let flat = crate::logical::expand_entries(entries, path, false, &mut self.warnings);
                 let mut out = String::new();
-                for en in entries {
-                    self.warn_trivia(path, &en.key_trivia);
-                    self.warn_trivia(&join_path(path, &en.key.text), &en.value.trivia);
+                for en in &flat {
+                    let epath = join_path(path, &en.key.text);
+                    self.emit_blanks_leading(&mut out, &epath, &en.key_trivia, &pad);
+                    // Value leading (separator-gap comments, merge clones)
+                    // has no line of its own; keep it above the key.
+                    self.emit_blanks_leading(&mut out, &epath, &en.value.trivia, &pad);
+                    if en.key_trivia.inline.is_some() {
+                        self.warn(
+                            &epath,
+                            WarningKind::CommentDropped,
+                            "key inline comment has no canonical position; dropped",
+                        );
+                    }
                     let key = yaml_plain_or_quoted(&en.key.text, 0);
                     if is_container(&en.value) {
-                        let child = self.emit_canonical(
-                            &en.value,
-                            &join_path(path, &en.key.text),
-                            level + 1,
-                        )?;
+                        let child = self.emit_canonical(&en.value, &epath, level + 1)?;
                         if child == "{}" || child == "[]" {
                             // Empty containers stay inline.
-                            out.push_str(&format!("{pad}{key}: {child}\n"));
+                            out.push_str(&format!("{pad}{key}: {child}"));
                         } else {
-                            out.push_str(&format!("{pad}{key}:\n{child}\n"));
+                            out.push_str(&format!("{pad}{key}:"));
+                            out.push_str(&self.inline_of(&en.value.trivia));
+                            out.push_str(&format!("\n{child}\n"));
+                            continue;
                         }
                     } else {
-                        let val =
-                            self.emit_canonical(&en.value, &join_path(path, &en.key.text), 0)?;
+                        let val = self.emit_canonical(&en.value, &epath, 0)?;
                         let val = indent_literal(&val, self.indent * (level + 1));
-                        out.push_str(&format!("{pad}{key}: {val}\n"));
+                        out.push_str(&format!("{pad}{key}: {val}"));
                     }
+                    out.push_str(&self.inline_of(&en.value.trivia));
+                    out.push('\n');
                 }
                 Ok(out.trim_end().to_string())
             }
@@ -1268,20 +1330,35 @@ impl YamlEmitter {
         }
     }
 
+    /// Blank lines + full-line comments at the current indent.
+    /// Markers are normalized to `#` (source markers like `//` are invalid
+    /// in YAML).
+    fn emit_blanks_leading(&mut self, out: &mut String, path: &str, t: &Trivia, pad: &str) {
+        for _ in 0..t.blanks_before {
+            out.push('\n');
+        }
+        for c in &t.leading {
+            for line in crate::logical::restyle_comment(c, "#") {
+                out.push_str(pad);
+                out.push_str(&line);
+                out.push('\n');
+            }
+        }
+        let _ = path;
+    }
+
+    /// ` # comment` suffix (or empty).
+    fn inline_of(&self, t: &Trivia) -> String {
+        match &t.inline {
+            Some(c) => format!(" {}", crate::logical::restyle_comment(c, "#").join(" ")),
+            None => String::new(),
+        }
+    }
+
     fn emit_canonical_root(&mut self, root: &Node) -> Result<String, Error> {
         let mut out = self.emit_canonical(root, "", 0)?;
         out.push('\n');
         Ok(out)
-    }
-
-    fn warn_trivia(&mut self, path: &str, t: &Trivia) {
-        if !t.leading.is_empty() || t.inline.is_some() {
-            self.warn(
-                path,
-                WarningKind::CommentDropped,
-                "comment has no verbatim slice in this output; dropped",
-            );
-        }
     }
 }
 
@@ -1442,6 +1519,49 @@ impl Format for YamlFormat {
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
         emit_yaml(doc, opt)
     }
+
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+        emit_yaml_logical(doc, opt)
+    }
+}
+
+/// Logical YAML output: canonical block form with comments preserved and
+/// merge keys expanded (used for every cross-format pair targeting YAML).
+pub fn emit_yaml_logical(doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+    let mut e = YamlEmitter {
+        indent: opt.indent.max(1),
+        warnings: Vec::new(),
+    };
+    let mut out = String::new();
+    for c in &doc.root.trivia.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    out.push_str(&e.emit_canonical(&doc.root, "", 0)?);
+    if !is_container(&doc.root) {
+        if let Some(c) = &doc.root.trivia.inline {
+            out.push(' ');
+            out.push_str(&crate::logical::restyle_comment(c, "#").join(" "));
+        }
+    } else if let Some(c) = &doc.root.trivia.inline {
+        // Nowhere to hang a root-container inline comment; keep it as a
+        // trailing line rather than dropping it.
+        out.push('\n');
+        out.push_str(&crate::logical::restyle_comment(c, "#").join(" "));
+    }
+    out.push('\n');
+    for c in &doc.trailing.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+    Ok(EmitOutput {
+        text: out,
+        warnings: e.warnings,
+    })
 }
 
 #[cfg(test)]

@@ -21,6 +21,7 @@ pub mod ini;
 pub mod json;
 pub mod json5;
 pub mod jsonc;
+pub mod logical;
 pub mod toml;
 pub mod util;
 pub mod yaml;
@@ -32,6 +33,12 @@ pub use ini::IniFormat;
 pub use json::JsonFormat;
 pub use json5::Json5Format;
 pub use jsonc::JsoncFormat;
+pub use logical::convert_text;
 pub use registry::{all_formats, detect_format, supported_names};
 pub use toml::TomlFormat;
 pub use yaml::YamlFormat;
+
+/// Plain IR key (canonical logical output builds keys from text).
+pub(crate) fn key_text(text: &str) -> cfgprism_core::Key {
+    cfgprism_core::Key::plain(text.to_string())
+}

@@ -566,6 +566,17 @@ fn emit_entry(
             .is_some_and(|o| o.starts_with('{'));
     match &e.value.value {
         Value::Map(children) if !is_inline_map => {
+            // Without a header gap the anchor syntax (if any) is lost;
+            // parsed tables always carry their prefix slice.
+            if e.key_trivia.prefix_raw.is_none() {
+                if let Some(a) = &e.value.anchor {
+                    warnings.push(Warning::new(
+                        e.key.text.clone(),
+                        WarningKind::AnchorExpanded,
+                        format!("anchor '{}' expanded (no verbatim spelling)", a.name),
+                    ));
+                }
+            }
             let Some(open) = e.value.open_raw.as_deref() else {
                 // Transparent implicit parent: children inline, no header.
                 for c in children {
@@ -608,6 +619,15 @@ fn emit_entry(
                 let Value::Map(children) = &el.value else {
                     return Err(Error::emit("mixed array-of-tables"));
                 };
+                if el.trivia.prefix_raw.is_none() {
+                    if let Some(a) = &el.anchor {
+                        warnings.push(Warning::new(
+                            e.key.text.clone(),
+                            WarningKind::AnchorExpanded,
+                            format!("anchor '{}' expanded (no verbatim spelling)", a.name),
+                        ));
+                    }
+                }
                 let Some(open) = el.open_raw.as_deref() else {
                     return Err(Error::emit("array-of-tables element without header"));
                 };
@@ -628,6 +648,17 @@ fn emit_entry(
         _ => {
             // Plain KV (or dotted-flattened KV).
             emit_gap(out, e.key_trivia.prefix_raw.as_deref(), first);
+            // Anchors survive only inside verbatim slices; without a
+            // separator slice the syntax is lost.
+            if e.sep_raw.is_none() {
+                if let Some(a) = &e.value.anchor {
+                    warnings.push(Warning::new(
+                        e.key.text.clone(),
+                        WarningKind::AnchorExpanded,
+                        format!("anchor '{}' expanded (no verbatim spelling)", a.name),
+                    ));
+                }
+            }
             out.push_str(e.key.raw.as_deref().unwrap_or(&e.key.text));
             out.push_str(e.sep_raw.as_deref().unwrap_or(" = "));
             emit_scalar(out, warnings, &e.key.text, &e.value)?;
@@ -763,6 +794,296 @@ impl Format for TomlFormat {
 
     fn emit(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
         emit_toml(doc, opt)
+    }
+
+    fn emit_logical(&self, doc: &Doc, opt: &Options) -> Result<EmitOutput, Error> {
+        emit_toml_logical(doc, opt)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Logical (canonical + warnings) emission for cross-format conversion.
+// ---------------------------------------------------------------------------
+
+/// Canonical logical TOML emitter: values before tables (reordering warned),
+/// comments preserved, anchors expanded, dotted-quoted keys as needed.
+pub fn emit_toml_logical(doc: &Doc, _opt: &Options) -> Result<EmitOutput, Error> {
+    let Value::Map(entries) = &doc.root.value else {
+        return Err(Error::emit("toml root must be a map"));
+    };
+    let mut warnings = Vec::new();
+    let mut out = String::new();
+    for c in &doc.root.trivia.leading {
+        out.push_str(c);
+        out.push('\n');
+    }
+    emit_level(&mut out, &mut warnings, entries, &[], true)?;
+    for c in &doc.trailing.leading {
+        out.push_str(c);
+        out.push('\n');
+    }
+    Ok(EmitOutput {
+        text: out,
+        warnings,
+    })
+}
+
+fn dotted_path(path: &[String]) -> String {
+    path.iter()
+        .map(|s| toml_key(s).to_string())
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// Bare TOML key when possible, double-quoted otherwise.
+fn toml_key(text: &str) -> String {
+    if !text.is_empty()
+        && text
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    {
+        text.to_string()
+    } else {
+        toml_basic_string(text)
+    }
+}
+
+/// Double-quoted TOML basic string with escapes.
+fn toml_basic_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{8}' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\u{c}' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn warn_anchor(warnings: &mut Vec<Warning>, path: &str, node: &Node) {
+    if let Some(a) = &node.anchor {
+        warnings.push(Warning::new(
+            path,
+            WarningKind::AnchorExpanded,
+            format!("anchor '{}' expanded (TOML has no anchors)", a.name),
+        ));
+    }
+}
+
+fn emit_trivia_full(out: &mut String, t: &Trivia) {
+    for _ in 0..t.blanks_before {
+        out.push('\n');
+    }
+    for c in &t.leading {
+        for line in crate::logical::restyle_comment(c, "#") {
+            out.push_str(&line);
+            out.push('\n');
+        }
+    }
+}
+
+fn emit_inline(out: &mut String, t: &Trivia) {
+    if let Some(c) = &t.inline {
+        out.push(' ');
+        out.push_str(&crate::logical::restyle_comment(c, "#").join(" "));
+    }
+}
+
+/// A value position classification for TOML ordering (values precede
+/// tables) and array-of-tables detection.
+#[derive(PartialEq, Eq)]
+enum TomlSlot {
+    Value,
+    Table,
+    AoT,
+}
+
+fn classify(node: &Node) -> TomlSlot {
+    match &node.value {
+        Value::Map(_) => TomlSlot::Table,
+        Value::Array(items)
+            if !items.is_empty() && items.iter().all(|i| matches!(i.value, Value::Map(_))) =>
+        {
+            TomlSlot::AoT
+        }
+        _ => TomlSlot::Value,
+    }
+}
+
+fn emit_level(
+    out: &mut String,
+    warnings: &mut Vec<Warning>,
+    entries: &[Entry],
+    path: &[String],
+    is_root: bool,
+) -> Result<(), Error> {
+    let here = dotted_path(path);
+    let flat = crate::logical::expand_entries(entries, &here, true, warnings);
+    // Partition preserving relative order; values must precede tables.
+    let mut values: Vec<&Entry> = Vec::new();
+    let mut tables: Vec<&Entry> = Vec::new();
+    let mut seen_table = false;
+    let mut reordered = false;
+    for e in &flat {
+        match classify(&e.value) {
+            TomlSlot::Value => {
+                values.push(e);
+                if seen_table {
+                    reordered = true;
+                }
+            }
+            TomlSlot::Table | TomlSlot::AoT => {
+                tables.push(e);
+                seen_table = true;
+            }
+        }
+    }
+    // Mixed arrays (some map elements) are invalid TOML: detect now for a
+    // precise error instead of corrupt output.
+    for e in &flat {
+        if let Value::Array(items) = &e.value.value {
+            if !items.is_empty()
+                && items.iter().any(|i| matches!(i.value, Value::Map(_)))
+                && !items.iter().all(|i| matches!(i.value, Value::Map(_)))
+            {
+                return Err(Error::emit(format!(
+                    "mixed arrays cannot be represented in TOML (key '{}')",
+                    join_logical_path(&here, &e.key.text)
+                )));
+            }
+        }
+    }
+    if reordered {
+        warnings.push(Warning::new(
+            here.clone(),
+            WarningKind::KeyReordered,
+            "keys reordered: TOML values must precede tables",
+        ));
+    }
+    for e in values {
+        emit_logical_kv(out, warnings, &here, e)?;
+    }
+    // Blank separator between values and tables is conventional; the stored
+    // blanks/comments of the first table still render below.
+    for e in tables {
+        emit_logical_table(out, warnings, path, e, is_root)?;
+    }
+    let _ = is_root;
+    Ok(())
+}
+
+fn join_logical_path(base: &str, key: &str) -> String {
+    if base.is_empty() {
+        key.to_string()
+    } else {
+        format!("{base}.{key}")
+    }
+}
+
+fn emit_logical_kv(
+    out: &mut String,
+    warnings: &mut Vec<Warning>,
+    here: &str,
+    e: &Entry,
+) -> Result<(), Error> {
+    let path = join_logical_path(here, &e.key.text);
+    warn_anchor(warnings, &path, &e.value);
+    emit_trivia_full(out, &e.key_trivia);
+    out.push_str(&toml_key(&e.key.text));
+    out.push_str(" = ");
+    let rendered = emit_logical_value(warnings, &path, &e.value)?;
+    out.push_str(&rendered);
+    emit_inline(out, &e.value.trivia);
+    out.push('\n');
+    Ok(())
+}
+
+fn emit_logical_value(
+    warnings: &mut Vec<Warning>,
+    path: &str,
+    node: &Node,
+) -> Result<String, Error> {
+    match &node.value {
+        Value::Null => Err(Error::emit(format!(
+            "null has no TOML representation ({path})"
+        ))),
+        Value::Bool(b) => Ok(b.to_string()),
+        Value::Number(n) => Ok(n.raw.clone()),
+        Value::Str(s) => Ok(toml_basic_string(s)),
+        Value::Datetime(d) => Ok(d.clone()),
+        Value::Array(items) => {
+            let mut parts = Vec::new();
+            for it in items {
+                warn_anchor(warnings, path, it);
+                parts.push(emit_logical_value(warnings, path, it)?);
+            }
+            Ok(format!("[{}]", parts.join(", ")))
+        }
+        Value::Map(entries) => {
+            // Inline table (array-nested or explicit inline position).
+            let flat = crate::logical::expand_entries(entries, path, true, warnings);
+            let mut parts = Vec::new();
+            for e in &flat {
+                warn_anchor(warnings, &join_logical_path(path, &e.key.text), &e.value);
+                parts.push(format!(
+                    "{} = {}",
+                    toml_key(&e.key.text),
+                    emit_logical_value(warnings, &join_logical_path(path, &e.key.text), &e.value)?
+                ));
+            }
+            Ok(format!("{{{}}}", parts.join(", ")))
+        }
+        _ => Err(Error::emit("unexpected value kind in TOML output")),
+    }
+}
+
+fn emit_logical_table(
+    out: &mut String,
+    warnings: &mut Vec<Warning>,
+    path: &[String],
+    e: &Entry,
+    _is_root: bool,
+) -> Result<(), Error> {
+    let here = dotted_path(path);
+    let tpath = join_logical_path(&here, &e.key.text);
+    warn_anchor(warnings, &tpath, &e.value);
+    let mut segs = path.to_vec();
+    segs.push(e.key.text.clone());
+    match &e.value.value {
+        Value::Map(children) => {
+            emit_trivia_full(out, &e.key_trivia);
+            out.push_str(&format!("[{}]", dotted_path(&segs)));
+            emit_inline(out, &e.value.trivia);
+            out.push('\n');
+            emit_level(out, warnings, children, &segs, false)?;
+            Ok(())
+        }
+        Value::Array(elements) => {
+            for el in elements {
+                let Value::Map(children) = &el.value else {
+                    return Err(Error::emit(format!("invalid array-of-tables at {tpath}")));
+                };
+                warn_anchor(warnings, &tpath, el);
+                emit_trivia_full(out, &e.key_trivia);
+                out.push_str(&format!("[[{}]]", dotted_path(&segs)));
+                emit_inline(out, &el.trivia);
+                out.push('\n');
+                emit_level(out, warnings, children, &segs, false)?;
+            }
+            Ok(())
+        }
+        _ => Err(Error::emit(format!(
+            "internal: non-table in table slot ({tpath})"
+        ))),
     }
 }
 
