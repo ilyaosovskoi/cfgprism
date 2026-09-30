@@ -155,3 +155,39 @@ Alternatives. Ambiguities in the brief are resolved here, not in chat.
 - Rationale: every rule is probe-verified; fixtures cover each shape.
 - Alternatives: emitting via `toml_edit` itself (rejected — bypasses the
   IR and teaches nothing about conversion).
+
+## D14. YAML: saphyr spanned events + own gap layer + own 1.2 resolver — 2026-09-30
+
+- Context: D2 named `saphyr-parser` as the event source but left open how
+  far it reaches (comments? anchor names? verbatim slices?).
+- Decision: probed `saphyr-parser 0.0.12` (throwaway tests, deleted after)
+  and built on what's solid — `SpannedEventReceiver` with byte-index
+  markers, exact scalar/alias/bracket spans, numeric anchor ids, core tags:
+  - Events own *structure* (out-of-subset input becomes a positioned
+    error, never a misparse); an own gap layer owns *trivia + verbatim
+    slices* (prefix/key/sep/value/suffix partition, pure concatenation on
+    emit, zero auto-whitespace); an own resolver implements YAML 1.2 core
+    (Norway `no`/`yes`/`on`/`off`, `1_000`, sexagesimal `12:34` and all
+    timestamps are strings; `0o17`/`0xFF` are ints; quoted scalars are
+    always strings; `!!` core tags honored).
+  - Anchor names: alias spans include `*name` verbatim; definitions found
+    by same-line backward scan with separator-gap fallback. Aliases clone
+    the anchored subtree at build time (recursive anchors fail cleanly as
+    "unknown anchor" instead of hanging).
+  - Flow collections included (exact bracket spans made them ~40 lines,
+    a bonus beyond the brief's subset): commas live in next-prefixes,
+    same-line close-gap comments attach to the last child.
+  - Explicit `---`/`...` preserved verbatim; second document → positioned
+    error (never silent loss). Non-core `!` tags, complex `?` keys and
+    anchors on keys → positioned errors. Duplicate keys are both kept
+    verbatim. `<<` merge keys stay literal entries (alias value cloned);
+    merge expansion happens at cross-conversion (Stage 4), not at build.
+  - Empty/comment-only documents → Null root with the whole source as tail.
+  - Canonical fallback emitter for programmatic docs: conservative quoter
+    (multiline always double-quoted with escapes — literal chomping is not
+    IR-stable), empty containers inline, anchors expand with warnings.
+- Rationale: every structural/spans claim probe-verified; fixtures cover
+  basic/anchors, multiline/chomping, flow, Norway matrix, merges, markers.
+- Alternatives: own line-based YAML parser (rejected — saphyr turns
+  out-of-subset input into precise errors instead of misparses); source
+  retention (rejected per D11).

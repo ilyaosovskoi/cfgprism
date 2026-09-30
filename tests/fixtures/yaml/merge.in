@@ -1,0 +1,11 @@
+defaults: &def
+  timeout: 30
+  retries: 3
+service:
+  <<: *def
+  name: api
+  timeout: 60
+override:
+  <<: *def
+plain_alias:
+  ref: *def

@@ -10,6 +10,7 @@ description = "cfgprism format implementations (one module per format)"
 cfgprism-core = { workspace = true }
 thiserror = { workspace = true }
 toml_edit = "0.22"
+saphyr-parser = "0.0"
 
 [dev-dependencies]
 

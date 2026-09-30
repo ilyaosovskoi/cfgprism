@@ -5,7 +5,7 @@
 
 use cfgprism_core::{values_equal, Format};
 use cfgprism_core::{Doc, Entry, Key, Node, Number, NumberKind, Options, Style, Trivia, Value};
-use cfgprism_formats::{DotenvFormat, IniFormat, JsonFormat, TomlFormat};
+use cfgprism_formats::{DotenvFormat, IniFormat, JsonFormat, TomlFormat, YamlFormat};
 
 struct Rng(u64);
 
@@ -102,7 +102,10 @@ fn json_value(rng: &mut Rng, depth: usize) -> Value {
 fn check_stable(fmt: &dyn Format, doc: &Doc) {
     let opt = Options::default();
     let out1 = fmt.emit(doc, &opt).expect("emit 1");
-    let doc2 = fmt.parse(&out1.text).expect("re-parse");
+    let doc2 = match fmt.parse(&out1.text) {
+        Ok(d) => d,
+        Err(e) => panic!("re-parse: {e}\n--- emitted:\n{}\n---", out1.text),
+    };
     assert!(
         values_equal(&doc.root, &doc2.root),
         "IR changed across round-trip for {}",
@@ -231,6 +234,77 @@ fn toml_parse_emit_parse_is_stable() {
                 value: map,
             });
         }
+        let mut root = Node::new(Value::Map(entries));
+        let mut c = 0;
+        node_order(&mut root, &mut c);
+        check_stable(&fmt, &Doc::new(root));
+    }
+}
+
+#[test]
+fn yaml_parse_emit_parse_is_stable() {
+    let fmt = YamlFormat;
+    let mut rng = Rng(0x1ea7_1000_0001);
+    const STRS: &[&str] = &[
+        "",
+        "a",
+        "hello world",
+        "no",
+        "yes",
+        "42",
+        "2024-01-01",
+        "trailing ",
+        "with: colon",
+        "with # hash",
+        "quote'q",
+        "line1\nline2",
+        "- dash",
+        "? question",
+    ];
+    for _ in 0..200 {
+        let scalar = |rng: &mut Rng| -> Node {
+            match rng.below(5) {
+                0 => Node::new(Value::Null),
+                1 => Node::new(Value::Bool(rng.below(2) == 0)),
+                2 => Node::new(Value::Number(Number {
+                    raw: rng
+                        .pick(&["0", "7", "-3", "2.5", "0o17", ".inf"])
+                        .to_string(),
+                    kind: NumberKind::Int,
+                })),
+                _ => Node::new(Value::Str(rng.pick(STRS).to_string())),
+            }
+        };
+        let value = |rng: &mut Rng, depth: usize| -> Value {
+            if depth == 0 || rng.below(3) == 0 {
+                return scalar(rng).value;
+            }
+            if rng.below(2) == 0 {
+                Value::Array((0..rng.below(3)).map(|_| scalar(rng)).collect())
+            } else {
+                Value::Map(
+                    (0..rng.below(3))
+                        .map(|i| Entry {
+                            key: Key::plain(format!("k{i}")),
+                            key_trivia: Trivia::empty(),
+                            sep_raw: None,
+                            value: scalar(rng),
+                        })
+                        .collect(),
+                )
+            }
+        };
+        let _ = &value;
+        // One level of nesting keeps canonical indent shapes simple; deeper
+        // shapes are covered by golden fixtures.
+        let entries: Vec<Entry> = (0..rng.below(4))
+            .map(|i| Entry {
+                key: Key::plain(format!("v{i}")),
+                key_trivia: Trivia::empty(),
+                sep_raw: None,
+                value: Node::new(value(&mut rng, 1)),
+            })
+            .collect();
         let mut root = Node::new(Value::Map(entries));
         let mut c = 0;
         node_order(&mut root, &mut c);

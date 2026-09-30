@@ -1,0 +1,4 @@
+---
+# Explicit document markers are preserved.
+a: 1
+...

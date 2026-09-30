@@ -11,6 +11,7 @@
 //! assert_eq!(detect_format("cfg.json"), Some("json"));
 //! assert_eq!(detect_format("cfg.toml"), Some("toml"));
 //! assert_eq!(detect_format(".env"), Some("dotenv"));
+//! assert_eq!(detect_format("a.yaml"), Some("yaml"));
 //! assert_eq!(detect_format("noext"), None);
 //! assert!(all_formats().find("json5").is_some());
 //! ```
@@ -22,6 +23,7 @@ pub mod json5;
 pub mod jsonc;
 pub mod toml;
 pub mod util;
+pub mod yaml;
 
 mod registry;
 
@@ -32,3 +34,4 @@ pub use json5::Json5Format;
 pub use jsonc::JsoncFormat;
 pub use registry::{all_formats, detect_format, supported_names};
 pub use toml::TomlFormat;
+pub use yaml::YamlFormat;

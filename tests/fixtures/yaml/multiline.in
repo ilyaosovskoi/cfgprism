@@ -1,0 +1,15 @@
+lit: |
+  line1
+  line2
+fold: >
+  folded
+  text
+keep: |+
+  kept
+
+strip: |-
+  stripped
+indented: |2
+    deep
+single: 'it''s quoted'
+double: "tab\there"

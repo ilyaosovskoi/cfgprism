@@ -105,7 +105,7 @@ fn unknown_target_format_fails() {
     let out = Command::new(bin())
         .args(["convert"])
         .arg(&input)
-        .args(["-t", "yaml"])
+        .args(["-t", "xml"])
         .output()
         .expect("spawn");
     assert!(!out.status.success());
@@ -136,9 +136,11 @@ fn stdin_without_from_fails_with_hint() {
 }
 
 #[test]
-fn formats_subcommand_lists_json() {
+fn formats_subcommand_lists_all_stage3_formats() {
     let out = Command::new(bin()).arg("formats").output().expect("spawn");
     assert!(out.status.success());
     let stdout = String::from_utf8(out.stdout).expect("utf8");
-    assert!(stdout.lines().any(|l| l.trim() == "json"), "{stdout}");
+    for name in ["json", "jsonc", "json5", "toml", "yaml", "dotenv", "ini"] {
+        assert!(stdout.lines().any(|l| l.trim() == name), "{stdout}");
+    }
 }

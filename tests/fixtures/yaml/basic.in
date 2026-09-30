@@ -1,0 +1,12 @@
+# cfgprism sample.
+server: &srv
+  host: example.com # inline comment
+  port: 8080
+
+# Blank line above.
+clients:
+  - one
+  - two # second
+  - *srv
+debug: false
+empty: ~

@@ -1,0 +1,23 @@
+# Norway problem: these are strings in YAML 1.2, not bools.
+a: no
+b: yes
+c: on
+d: off
+e: No
+f: YES
+g: 'no' # quoted, still a string
+h: "off"
+# Numbers and lookalikes.
+oct: 0o17
+hex: 0xFF
+us: 1_000
+sexa: 12:34
+trail: 5.
+lead: .5
+exp: 1e3
+inf: .inf
+ninf: -.Inf
+nan: .nan
+plus: +42
+date: 2024-01-01
+ts: 1979-05-27T07:32:00Z

@@ -4,7 +4,9 @@
 
 use cfgprism_core::FormatRegistry;
 
-use crate::{DotenvFormat, IniFormat, Json5Format, JsonFormat, JsoncFormat, TomlFormat};
+use crate::{
+    DotenvFormat, IniFormat, Json5Format, JsonFormat, JsoncFormat, TomlFormat, YamlFormat,
+};
 
 /// Build the registry with every supported format (help order).
 #[must_use]
@@ -14,6 +16,7 @@ pub fn all_formats() -> FormatRegistry {
         Box::new(JsoncFormat),
         Box::new(Json5Format),
         Box::new(TomlFormat),
+        Box::new(YamlFormat),
         Box::new(DotenvFormat),
         Box::new(IniFormat),
     ])
@@ -29,8 +32,8 @@ pub fn supported_names() -> Vec<&'static str> {
 ///
 /// Extension match is case-insensitive; additionally the basename `.env`
 /// maps to `dotenv`. Returns `None` when nothing matches (`-`, stdin and
-/// unknown extensions). Reserved future extensions (yaml/yml/hcl/properties/
-/// kdl/ron) return `None` for now so the CLI reports "cannot detect" with a
+/// unknown extensions). Reserved future extensions (hcl/properties/kdl/ron)
+/// return `None` for now so the CLI reports "cannot detect" with a
 /// `-f/--from` hint instead of a misleading guess.
 #[must_use]
 pub fn detect_format(path: &str) -> Option<&'static str> {
@@ -47,6 +50,7 @@ pub fn detect_format(path: &str) -> Option<&'static str> {
         "jsonc" => Some("jsonc"),
         "json5" => Some("json5"),
         "toml" => Some("toml"),
+        "yaml" | "yml" => Some("yaml"),
         "env" => Some("dotenv"),
         "ini" | "cfg" | "conf" => Some("ini"),
         _ => None,
@@ -73,7 +77,7 @@ mod tests {
     fn unknown_or_missing_extension_is_none() {
         assert_eq!(detect_format("noext"), None);
         assert_eq!(detect_format("cfg.xml"), None);
-        assert_eq!(detect_format("config.yaml"), None);
+        assert_eq!(detect_format("config.yaml"), Some("yaml"));
         assert_eq!(detect_format("-"), None);
     }
 }
