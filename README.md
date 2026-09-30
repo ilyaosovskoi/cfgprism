@@ -79,5 +79,5 @@ docs/DECISIONS.md        — decision log (append-only)
 
 ## License
 
-MIT OR Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`). All dependencies are
-checked for compatibility.
+MIT (`LICENSE-MIT`). Runtime dependencies are MIT/Apache-2.0 dual-licensed
+except `kdl` (Apache-2.0); see `cargo license`-style audit in CI (planned).

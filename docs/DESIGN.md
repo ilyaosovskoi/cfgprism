@@ -248,9 +248,9 @@ on stderr.
    pure Rust and should build for `wasm32-unknown-unknown`; `ron` and our
    own code too. Low risk, but verify in Stage 1 via
    `cargo check --target wasm32-unknown-unknown` for core.
-3. **Licenses:** everything chosen is MIT OR Apache-2.0 (verified via
-   crates.io/docs.rs). `taplo` is MIT too but was not chosen. No GPL
-   dependencies — the "MIT OR Apache-2.0" requirement holds.
+3. **Licenses:** the project itself is MIT. All chosen parser crates are MIT
+   or MIT/Apache-2.0 dual-licensed, except `kdl` (Apache-2.0) — depending on
+   it from MIT code is fine; binary distributions must keep its NOTICE.
 4. **5 MB < 1 s:** not measured in Stage 0 (no code). All chosen parsers are
    linear/predictive; our own JSON/YAML will be single-pass. Verified by a
    bench in Stage 2.
