@@ -4,3 +4,6 @@
 *.rej
 dist/
 web/pkg/
+
+# Personal agent notes — local only, never commit.
+AGENTS.md
