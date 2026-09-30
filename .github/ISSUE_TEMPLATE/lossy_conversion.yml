@@ -1,0 +1,42 @@
+name: Lossy conversion report
+description: Data or trivia silently lost (or a warning is missing/wrong)
+title: "[lossy] "
+labels: [lossy-conversion]
+body:
+  - type: input
+    id: pair
+    attributes:
+      label: Format pair and direction
+      placeholder: yaml -> json
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: lost
+    attributes:
+      label: What was lost (comment? key order? anchor? value?)
+      description: Quote the exact bytes that disappeared or changed.
+    validations:
+      required: true
+  - type: textarea
+    id: warnings
+    attributes:
+      label: Warnings emitted (stderr)
+      description: Paste stderr. If empty, that itself is the bug.
+      render: text
+    validations:
+      required: false
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Proposed handling
+      options:
+        - New WarningKind + warning (loss is expressible)
+        - Hard error (unrepresentable, must not convert)
+        - Not sure

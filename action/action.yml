@@ -1,0 +1,71 @@
+name: "cfgprism sync check"
+description: "Verify config files in different formats carry the same data (cfgprism check)"
+branding:
+  icon: check-circle
+  color: green
+
+inputs:
+  files:
+    description: "Whitespace-separated list of files that must be in sync (at least two)"
+    required: true
+  version:
+    description: "cfgprism version to install (tag like v0.1.0, or 'latest' for the newest release)"
+    required: false
+    default: latest
+  unordered:
+    description: "Compare ignoring key order (for reordering targets like TOML)"
+    required: false
+    default: "false"
+  extra-args:
+    description: "Extra arguments appended to `cfgprism check`"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install cfgprism
+      shell: bash
+      env:
+        CFGPRISM_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        REPO="ilyaosovskoi/cfgprism"
+        if [ "$CFGPRISM_VERSION" = "latest" ]; then
+          if command -v gh >/dev/null 2>&1; then
+            TAG="$(gh release view --repo "$REPO" --json tagName -q .tagName)"
+          else
+            TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name"' | cut -d'"' -f4)"
+          fi
+        else
+          TAG="$CFGPRISM_VERSION"
+        fi
+        OS="$(uname -s)"; ARCH="$(uname -m)"
+        case "$OS-$ARCH" in
+          Linux-x86_64) TRIPLE="x86_64-unknown-linux-gnu" ;;
+          Darwin-arm64) TRIPLE="aarch64-apple-darwin" ;;
+          Darwin-x86_64) TRIPLE="x86_64-apple-darwin" ;;
+          MINGW*-x86_64|MSYS*-x86_64|CYGWIN*-x86_64) TRIPLE="x86_64-pc-windows-msvc" ;;
+          *) echo "cfgprism/action: unsupported platform $OS-$ARCH; falling back to cargo install" >&2; TRIPLE="" ;;
+        esac
+        if [ -n "$TRIPLE" ] && curl -fsSL -o /tmp/cfgprism.tar.gz "https://github.com/${REPO}/releases/download/${TAG}/cfgprism-${TRIPLE}.tar.gz"; then
+          mkdir -p "$HOME/.cfgprism/bin" && tar -xzf /tmp/cfgprism.tar.gz -C "$HOME/.cfgprism/bin"
+          echo "$HOME/.cfgprism/bin" >> "$GITHUB_PATH"
+        else
+          cargo install --git "https://github.com/${REPO}.git" ${TAG:+--tag "$TAG"} --locked
+        fi
+        cfgprism --version 2>/dev/null || cfgprism formats
+    - name: Check files in sync
+      shell: bash
+      env:
+        CFGPRISM_FILES: ${{ inputs.files }}
+        CFGPRISM_UNORDERED: ${{ inputs.unordered }}
+        CFGPRISM_EXTRA: ${{ inputs.extra-args }}
+      run: |
+        set -euo pipefail
+        # shellcheck disable=SC2086
+        ARGS=""
+        [ "$CFGPRISM_UNORDERED" = "true" ] && ARGS="$ARGS --unordered"
+        # shellcheck disable=SC2086,SC2248
+        # shellcheck disable=SC2086
+        cfgprism check $ARGS $CFGPRISM_FILES $CFGPRISM_EXTRA

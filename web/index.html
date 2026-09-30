@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cfgprism — lossless-ish config converter (web demo)</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<header>
+  <h1>cfgprism <span class="sub">web demo — 100% in-browser, no backend</span></h1>
+  <p>
+    Convert configs between formats with explicit warnings.
+    Same engine as the CLI, compiled to WebAssembly.
+    <a href="https://github.com/ilyaosovskoi/cfgprism">GitHub</a>
+  </p>
+</header>
+<main>
+  <div class="toolbar">
+    <label>From
+      <select id="from"></select>
+    </label>
+    <button id="swap" title="Swap formats">⇄</button>
+    <label>To
+      <select id="to"></select>
+    </label>
+    <button id="copy-link" title="Copy a link with the current state in the URL hash">Copy as link</button>
+    <span id="status" role="status"></span>
+  </div>
+  <div class="panes">
+    <section>
+      <h2>Input</h2>
+      <textarea id="input" spellcheck="false"></textarea>
+    </section>
+    <section>
+      <h2>Output</h2>
+      <pre id="output"></pre>
+    </section>
+  </div>
+  <section>
+    <h2>Warnings <span id="warn-count"></span></h2>
+    <ul id="warnings"></ul>
+    <p id="error" class="error"></p>
+  </section>
+</main>
+<footer>
+  <p>State lives in the URL hash (<code>#from=&amp;to=&amp;src=</code>, base64url) — share it with “Copy as link”.</p>
+</footer>
+<script type="module" src="./app.js"></script>
+</body>
+</html>

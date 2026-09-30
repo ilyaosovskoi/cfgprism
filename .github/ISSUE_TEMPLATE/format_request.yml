@@ -1,0 +1,33 @@
+name: Format request
+description: Ask for a new configuration format
+title: "[format] "
+labels: [format-request]
+body:
+  - type: input
+    id: format
+    attributes:
+      label: Format name and extensions
+      placeholder: e.g. XML (.xml), YAML-subset, Dhall (.dhall)
+    validations:
+      required: true
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample document (with comments if the format has them)
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: fidelity
+    attributes:
+      label: What should round-trip?
+      options:
+        - Values + comments + order (full)
+        - Values + order (no comments in this format)
+        - Values only (best effort)
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else (spec link, edge cases, prior art)

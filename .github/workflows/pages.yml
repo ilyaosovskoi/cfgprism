@@ -1,0 +1,56 @@
+name: web-demo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "web/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      - name: Build WASM package
+        run: wasm-pack build crates/cfgprism-wasm --target web --out-dir ../../web/pkg --out-name cfgprism
+      - name: Smoke-test the bundle
+        run: |
+          node -e "
+            import('fs').then(async (fs) => {
+              const mod = await import('./web/pkg/cfgprism.js');
+              const bytes = fs.readFileSync('./web/pkg/cfgprism_bg.wasm');
+              mod.initSync({ module: bytes });
+              const out = JSON.parse(mod.convert_text('yaml', 'json', 'a: 1\n'));
+              if (!out.text.includes('\"a\": 1')) process.exit(1);
+              console.log('wasm smoke ok');
+            });"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

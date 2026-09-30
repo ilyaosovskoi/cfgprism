@@ -64,3 +64,16 @@ for the README matrix, and the `good first issue` follow-ups you left out.
 - Bug reports: include input, expected and actual output (see issue templates).
 - Decisions with trade-offs go to `docs/DECISIONS.md` (append-only, D-numbered).
 - Keep it English everywhere (docs, code, comments, messages).
+
+## Releasing (maintainers)
+
+1. Bump `version` in the root `Cargo.toml`, update `CHANGELOG.md` (create it
+   on first release), commit.
+2. Push a tag: `git tag vX.Y.Z && git push origin vX.Y.Z` — the `release`
+   workflow (cargo-dist, 5 targets) builds, uploads artifacts and drafts
+   the GitHub release.
+3. Fill `packaging/homebrew/cfgprism.rb` (`FIXME` version/sha256) and copy it
+   to the tap repo; update `packaging/scoop/cfgprism.json` (`FIXME` hash);
+   `cargo-dist` publishes the npm wrapper automatically (`NODE_AUTH_TOKEN`
+   secret required).
+4. Verify: `cargo install cfgprism@X.Y.Z`, `brew install`, `npx cfgprism`.

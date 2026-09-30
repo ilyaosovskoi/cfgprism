@@ -158,6 +158,36 @@ fn formats_subcommand_lists_all_stage3_formats() {
 }
 
 #[test]
+fn check_sync_and_mismatch() {
+    let a = write_tmp("a.json", r#"{"x": 1}"#);
+    let b = write_tmp("b.toml", "x = 1\n");
+    let c = write_tmp("c.json", r#"{"x": 2}"#);
+    let ok = Command::new(bin())
+        .args(["check"])
+        .arg(&a)
+        .arg(&b)
+        .output()
+        .expect("spawn");
+    assert!(
+        ok.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&ok.stderr)
+    );
+    let bad = Command::new(bin())
+        .args(["check"])
+        .arg(&a)
+        .arg(&c)
+        .output()
+        .expect("spawn");
+    assert!(!bad.status.success());
+    let stderr = String::from_utf8(bad.stderr).expect("utf8");
+    assert!(stderr.contains("mismatch"), "{stderr}");
+    std::fs::remove_file(a).ok();
+    std::fs::remove_file(b).ok();
+    std::fs::remove_file(c).ok();
+}
+
+#[test]
 fn convert_properties_to_json() {
     let input = write_tmp("in.properties", "k = v\n");
     let out = Command::new(bin())

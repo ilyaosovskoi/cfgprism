@@ -1,0 +1,40 @@
+name: Bug report
+description: Something converts wrong
+title: "[bug] "
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: cfgprism version (`cfgprism --version`, or commit)
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command run
+      placeholder: cfgprism convert -f yaml -t json < config.yaml
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Input
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected output
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output (plus stderr warnings, if any)
+      render: text
+    validations:
+      required: true

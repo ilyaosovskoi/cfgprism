@@ -1,18 +1,18 @@
-//! `cfgprism convert <in> [-f FROM] -t TO [-o OUT] [--strict]`
+//! `cfgprism convert` / `cfgprism check`.
 //!
-//! - `<in>`: file path, `-`, or omitted (= stdin).
-//! - `-f/--from`: source format; guessed from the input extension otherwise.
-//! - `-t/--to`: target format (required).
-//! - `-o/--output`: output file; stdout otherwise.
+//! - `convert <in> [-f FROM] -t TO [-o OUT] [--strict]`: convert between
+//!   formats (`-`/omitted input = stdin; format guessed from extension).
+//! - `check <A> <B>…`: verify files in (possibly different) formats carry
+//!   the same data; exits 1 on mismatch (for CI sync checks).
 //! - `--strict`: any warning becomes a hard error (non-zero exit).
 //! - Warnings always go to stderr; converted text goes to stdout/file.
 
 use std::io::{IsTerminal, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cfgprism_core::{Error, Options};
-use cfgprism_formats::{convert_text, detect_format, supported_names};
+use cfgprism_formats::{all_formats, convert_text, detect_format, supported_names};
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
@@ -30,6 +30,8 @@ struct Cli {
 enum Cmd {
     /// Convert a config file between formats.
     Convert(ConvertArgs),
+    /// Check that files in (possibly different) formats carry the same data.
+    Check(CheckArgs),
     /// List supported formats.
     Formats,
 }
@@ -62,6 +64,161 @@ struct ConvertArgs {
     indent: usize,
 }
 
+/// CLI args for `cfgprism check`.
+#[derive(Debug, Parser)]
+struct CheckArgs {
+    /// Files to compare (at least two). Each file's format is guessed from
+    /// its extension unless overridden with `--as`.
+    #[arg(value_name = "FILE", required = true)]
+    files: Vec<PathBuf>,
+
+    /// Explicit `path,format` overrides (repeatable), e.g.
+    /// `--as config.txt,json`.
+    #[arg(long = "as", value_name = "PATH,FORMAT")]
+    as_format: Vec<String>,
+
+    /// Compare ignoring key order (for targets that reorder, e.g. TOML).
+    /// Default is order-sensitive.
+    #[arg(long = "unordered")]
+    unordered: bool,
+}
+
+fn run_check(a: CheckArgs) -> Result<(), Error> {
+    if a.files.len() < 2 {
+        return Err(Error::io("check needs at least two files"));
+    }
+    let mut overrides: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for item in &a.as_format {
+        let (path, fmt) = item
+            .split_once(',')
+            .ok_or_else(|| Error::io(format!("bad --as value '{item}' (want PATH,FORMAT)")))?;
+        overrides.insert(path.to_string(), fmt.to_string());
+    }
+    let registry = all_formats();
+    let mut docs: Vec<(String, cfgprism_core::Doc)> = Vec::new();
+    for file in &a.files {
+        let display = file.display().to_string();
+        let fmt_name = overrides.get(&display).cloned().unwrap_or_else(|| {
+            detect_format(&display)
+                .map(str::to_string)
+                .unwrap_or_default()
+        });
+        if fmt_name.is_empty() {
+            return Err(Error::unsupported_format(format!(
+                "cannot detect format of '{display}'; pass --as {display},FORMAT"
+            )));
+        }
+        let fmt = registry.find(&fmt_name).ok_or_else(|| {
+            Error::unsupported_format(format!(
+                "unsupported format '{fmt_name}' (supported: {})",
+                supported_names().join(", ")
+            ))
+        })?;
+        let src = read_file(file)?;
+        let doc = fmt.parse(&src)?;
+        docs.push((display, doc));
+    }
+    let (first_name, first) = &docs[0];
+    let mut failed = false;
+    for (name, doc) in docs.iter().skip(1) {
+        let equal = if a.unordered {
+            cfgprism_core::values_equal_unordered(&first.root, &doc.root)
+        } else {
+            cfgprism_core::values_equal(&first.root, &doc.root)
+        };
+        if !equal {
+            failed = true;
+            match first_difference(&first.root, &doc.root, "") {
+                Some(diff) => eprintln!("cfgprism: mismatch: {first_name} vs {name} at {diff}"),
+                None => eprintln!("cfgprism: mismatch: {first_name} vs {name}"),
+            }
+        }
+    }
+    if failed {
+        Err(Error::new(
+            cfgprism_core::ErrorKind::Other("mismatch".to_string()),
+            1,
+            1,
+            "checked files differ",
+        ))
+    } else {
+        println!("cfgprism: {} file(s) in sync", docs.len());
+        Ok(())
+    }
+}
+
+/// First differing path between two IR trees (`None` when only trivia
+/// differs, which still counts as a mismatch here only if values differ —
+/// actually values_equal already covers it; this reports *where*).
+fn first_difference(
+    a: &cfgprism_core::Node,
+    b: &cfgprism_core::Node,
+    path: &str,
+) -> Option<String> {
+    use cfgprism_core::Value;
+    let here = if path.is_empty() {
+        "<root>".to_string()
+    } else {
+        path.to_string()
+    };
+    match (&a.value, &b.value) {
+        (Value::Map(x), Value::Map(y)) => {
+            if x.len() != y.len() {
+                return Some(format!("{here}: {} vs {} keys", x.len(), y.len()));
+            }
+            for (ex, ey) in x.iter().zip(y.iter()) {
+                if ex.key.text != ey.key.text {
+                    return Some(format!(
+                        "{here}: key '{}' vs '{}'",
+                        ex.key.text, ey.key.text
+                    ));
+                }
+                let sub = if here == "<root>" {
+                    ex.key.text.clone()
+                } else {
+                    format!("{here}.{}", ex.key.text)
+                };
+                if !cfgprism_core::values_equal(&ex.value, &ey.value) {
+                    return first_difference(&ex.value, &ey.value, &sub).or(Some(sub));
+                }
+            }
+            None
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            if x.len() != y.len() {
+                return Some(format!(
+                    "{here}: [{x_len} vs {y_len} items]",
+                    x_len = x.len(),
+                    y_len = y.len()
+                ));
+            }
+            for (i, (px, py)) in x.iter().zip(y.iter()).enumerate() {
+                if !cfgprism_core::values_equal(px, py) {
+                    return first_difference(px, py, &format!("{here}[{i}]"))
+                        .or(Some(format!("{here}[{i}]")));
+                }
+            }
+            None
+        }
+        _ => {
+            if cfgprism_core::values_equal(a, b) {
+                None
+            } else {
+                Some(format!(
+                    "{here}: {} vs {}",
+                    a.display_value(),
+                    b.display_value()
+                ))
+            }
+        }
+    }
+}
+
+fn read_file(path: &Path) -> Result<String, Error> {
+    std::fs::read_to_string(path)
+        .map_err(|e| Error::io(format!("cannot read {}: {e}", path.display())))
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -76,6 +233,7 @@ fn run() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::Convert(a) => run_convert(a),
+        Cmd::Check(a) => run_check(a),
         Cmd::Formats => {
             for name in supported_names() {
                 println!("{name}");

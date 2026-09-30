@@ -284,3 +284,30 @@ Alternatives. Ambiguities in the brief are resolved here, not in chat.
 - Alternatives: `hcl-edit` integration (rejected — decor mapping without
   round-trip control); KDL byte-verbatim via spans (deferred — the `}`
   gap has no dedicated slice; follow-up); `ron2` (rejected per D8).
+
+## D18. Stage 6/7 DX choices — 2026-09-30
+
+- Context: sync checks, releases and the web demo need concrete shapes.
+- Decision:
+  - `cfgprism check A B…` compares IR with `values_equal` (ordered by
+    default, `--unordered` for reordering targets), prints the first
+    differing path, exits 1 on mismatch. `--as PATH,FORMAT` overrides
+    detection. The composite `action/action.yml` (`uses:
+    ilyaosovskoi/cfgprism/action`) installs a release binary (cargo-install
+    fallback) and runs it; `.pre-commit-hooks.yaml` exposes the same as a
+    `system` hook.
+  - Releases via cargo-dist (5 targets, shell/powershell/npm/homebrew
+    installers) on `v*` tags; Homebrew/Scoop/npm have `packaging/`
+    templates with `FIXME`s until the first release exists. `cargo install`
+    from git works today.
+  - Demo SVG in README is a static illustration (no recording toolchain in
+    this environment), labeled by context, not passed off as a recording.
+  - Web demo: hand-written `web/` page (no framework), wasm-pack `web`
+    target, `web/pkg/` git-ignored and rebuilt by the Pages workflow
+    (which also node smoke-tests the bundle). State = `#from=&to=&src=`
+    base64url; wasm32 runs YAML/KDL collection inline (no threads).
+- Rationale: everything above is verified — `check` by CLI tests, the
+  Action by reading (runs on first use), the WASM bundle by a node smoke
+  test locally and in CI, Pages enabled via API.
+- Alternatives: committing built `web/pkg` (rejected — generated output,
+  CI rebuilds); trunk/bundlers (rejected — zero-dependency page).

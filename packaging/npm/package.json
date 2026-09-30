@@ -1,0 +1,19 @@
+{
+  "name": "cfgprism",
+  "version": "0.1.0",
+  "description": "Lossless-ish config converter with explicit warnings (native binary wrapper)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilyaosovskoi/cfgprism.git"
+  },
+  "bin": {
+    "cfgprism": "./bin/cfgprism.js"
+  },
+  "scripts": {
+    "postinstall": "node ./install.js"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

@@ -12,8 +12,31 @@ resolver = "2"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
-repository = "https://github.com/example/cfgprism"
+repository = "https://github.com/ilyaosovskoi/cfgprism"
+homepage = "https://github.com/ilyaosovskoi/cfgprism"
+description = "Lossless-ish config converter with explicit warnings"
 version = "0.1.0"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.28.0"
+installers = ["shell", "powershell", "npm", "homebrew"]
+tap = "ilyaosovskoi/homebrew-tap"
+publish-jobs = ["release"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+install-path = "CARGO_HOME"
+npm-package = "cfgprism"
+npm-scope = ""
+precise-builds = false
+checksum = "sha256"
+# Requires a release tag push (v*) by a maintainer; needs secrets below.
+# github-releases: GITHUB_TOKEN (provided); homebrew tap: HOMEBREW_TAP_TOKEN;
+# npm publish: NODE_AUTH_TOKEN.
 
 [workspace.dependencies]
 cfgprism-core = { path = "crates/cfgprism-core" }

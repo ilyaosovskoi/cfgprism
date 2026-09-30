@@ -3,3 +3,4 @@
 *.orig
 *.rej
 dist/
+web/pkg/

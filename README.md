@@ -4,13 +4,47 @@ A config converter between formats **without silent losses**: it preserves
 comments, key order and formatting wherever the target format can express
 them, and warns explicitly wherever loss is unavoidable.
 
-> Status: **Stage 5 — more formats — done.** HCL (simplified, own parser),
-> Properties (own parser) round-trip byte-identically; KDL and RON round-trip
-> canonically (values, comments, order preserved; layout normalized).
-> 11 formats total. Architecture and parser choices:
-> [`docs/DESIGN.md`](docs/DESIGN.md); decision log:
-> [`docs/DECISIONS.md`](docs/DECISIONS.md); adding more:
+> Status: **Stage 6 — DX and growth — done.** `cfgprism check` for sync
+> checks, composite GitHub Action + pre-commit hook, cargo-dist releases
+> (5 targets + homebrew/scoop/npm scaffolding), issue/PR templates.
+> Architecture and parser choices: [`docs/DESIGN.md`](docs/DESIGN.md);
+> decision log: [`docs/DECISIONS.md`](docs/DECISIONS.md); adding more:
 > [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+![cfgprism demo](docs/demo.svg)
+
+## Web demo
+
+<https://ilyaosovskoi.github.io/cfgprism/> — two panes, format selects,
+warnings, and a “Copy as link” button (state in the URL hash). Same engine
+as the CLI, compiled to WebAssembly; everything runs in the browser, no
+backend. Sources: [`web/`](web/).
+
+## Install
+
+```sh
+cargo install cfgprism            # crates.io (after first release)
+brew install ilyaosovskoi/tap/cfgprism   # macOS/Linux (after first release)
+scoop bucket add cfgprism https://github.com/ilyaosovskoi/scoop-bucket  # Windows (planned)
+npx cfgprism --version            # npm wrapper (downloads the native binary)
+```
+
+From source (works today, no network at runtime):
+
+```sh
+cargo install --git https://github.com/ilyaosovskoi/cfgprism.git --locked
+```
+
+## Why not yq / dasel
+
+| | yq | dasel | cfgprism |
+|---|---|---|---|
+| Comments on conversion | silently dropped (`-o=json`) | discarded on input (man page says so) | preserved, else `Warning` on stderr |
+| Key order | may be re-sorted | not guaranteed | always preserved |
+| YAML anchors → JSON/TOML | expanded silently | expanded silently | expanded + `AnchorExpanded` |
+| `--strict` (warning → error) | no | no | yes |
+| Config sync check | no | no | `cfgprism check` + Action + pre-commit hook |
+| Scope | jq-style querying | unified selectors | conversion fidelity only |
 
 ## Conversion matrix
 
@@ -81,11 +115,36 @@ cat config.json | cfgprism convert -f json -t jsonc
 # Any warning becomes a hard error
 cfgprism convert config.toml -t toml --strict
 
-# Supported formats (stage 5): json jsonc json5 toml yaml dotenv ini hcl properties kdl ron
+# Verify mirrored configs carry the same data (exit 1 on mismatch)
+cfgprism check config/app.json config/app.toml
+cfgprism check --unordered a.toml b.json
+
+# Supported formats: json jsonc json5 toml yaml dotenv ini hcl properties kdl ron
 cfgprism formats
 ```
 
 Warnings always go to stderr; converted text goes to stdout (or `-o` file).
+
+## Keeping mirrored configs in sync (CI)
+
+GitHub Action (`uses: ilyaosovskoi/cfgprism/action`, see `action/action.yml`):
+
+```yaml
+- uses: ilyaosovskoi/cfgprism/action@v0
+  with:
+    files: config/app.json config/app.toml
+```
+
+pre-commit hook (see `.pre-commit-hooks.yaml`):
+
+```yaml
+repos:
+  - repo: https://github.com/ilyaosovskoi/cfgprism
+    rev: v0.1.0
+    hooks:
+      - id: cfgprism-sync
+        args: [config/app.json, config/app.toml]
+```
 
 ## Project layout
 
@@ -110,6 +169,8 @@ docs/DECISIONS.md        — decision log (append-only)
 - [x] Stage 3. YAML (subset + flow + Norway tests)
 - [x] Stage 4. Cross-conversion, full pair matrix, bench + fuzz
 - [x] Stage 5. HCL, Properties, KDL, RON
+- [x] Stage 6. DX, releases, sync checks
+- [x] Stage 7. Web demo (WASM + GitHub Pages)
 - [ ] Stage 6. DX and growth (README/GIF, CONTRIBUTING, templates, releases)
 - [ ] Stage 7. Web demo (WASM + GitHub Pages)
 

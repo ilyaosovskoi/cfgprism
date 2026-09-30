@@ -1,0 +1,15 @@
+{
+    "version": "0.1.0",
+    "description": "Lossless-ish config converter with explicit warnings",
+    "homepage": "https://github.com/ilyaosovskoi/cfgprism",
+    "license": "MIT",
+    "url": "https://github.com/ilyaosovskoi/cfgprism/releases/download/v0.1.0/cfgprism-x86_64-pc-windows-msvc.zip",
+    "hash": "FIXME-SHA256",
+    "bin": "cfgprism.exe",
+    "checkver": {
+        "github": "https://github.com/ilyaosovskoi/cfgprism"
+    },
+    "autoupdate": {
+        "url": "https://github.com/ilyaosovskoi/cfgprism/releases/download/v$version/cfgprism-x86_64-pc-windows-msvc.zip"
+    }
+}

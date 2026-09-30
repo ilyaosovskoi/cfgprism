@@ -1,0 +1,17 @@
+# Shareable pre-commit hooks: add this repo to your own
+# .pre-commit-config.yaml to keep mirrored configs in sync:
+#
+# repos:
+#   - repo: https://github.com/ilyaosovskoi/cfgprism
+#     rev: v0.1.0
+#     hooks:
+#       - id: cfgprism-sync
+#         args: [config/app.json, config/app.toml]
+- id: cfgprism-sync
+  name: cfgprism sync check
+  description: Verify listed config files carry the same data (cfgprism check)
+  entry: cfgprism check
+  language: system
+  pass_filenames: false
+  always_run: true
+  files: ""
